@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  database:
+    image: mysql:8.0
+    container_name: saas_db
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: ortoptica
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ortoptica_network
+
+  redis:
+    image: redis:alpine
+    container_name: saas_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ortoptica_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saas_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/var/www
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - ortoptica_network
+
+  ml_service:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile
+    container_name: saas_ml
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./ml_service:/app
+    networks:
+      - ortoptica_network
+
+  vector_db:
+    image: qdrant/qdrant:latest
+    container_name: saas_vector
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./vector_db/qdrant_storage:/qdrant/storage
+    networks:
+      - ortoptica_network
+
+  painel_admin:
+    build:
+      context: ./painel_admin
+      dockerfile: Dockerfile
+    container_name: saas_painel
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./painel_admin:/app
+      - /app/node_modules
+    networks:
+      - ortoptica_network
+
+networks:
+  ortoptica_network:
+    driver: bridge
+
+volumes:
+  db_data:
+    driver: local
+  redis_data:
+    driver: local

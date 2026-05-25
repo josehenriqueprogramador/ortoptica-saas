@@ -1,0 +1,30 @@
+# Docker
+*.log
+docker-data/
+.env
+
+# Laravel
+backend/vendor/
+backend/node_modules/
+backend/storage/
+backend/bootstrap/cache/
+
+# React
+painel_admin/node_modules/
+painel_admin/dist/
+
+# Python
+ml_service/__pycache__/
+ml_service/.venv/
+
+# Flutter
+.build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# OS
+.DS_Store
+Thumbs.db
