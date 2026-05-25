@@ -1,6 +1,7 @@
 import asyncio
 import math
 import time
+import struct
 import cv2
 import numpy as np
 import mediapipe as mp
@@ -8,13 +9,13 @@ from collections import deque
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 app = FastAPI(
-    title="Computational Orthoptics Neuro-Biocalibrated Engine",
-    version="5.0.0"
+    title="Multithreaded Kinematic & Regularized Estimation Engine",
+    version="10.0.0"
 )
 
 mp_face_mesh = mp.solutions.face_mesh
 
-# --- 1. ENGENHARIA DE SINAIS: FILTRO DE KALMAN 1D ---
+# --- 1. FILTRO DE KALMAN 1D ---
 class OcularKalmanFilter:
     def __init__(self, q_process_noise=1e-4, r_measure_noise=1e-2):
         self.q = q_process_noise  
@@ -32,287 +33,247 @@ class OcularKalmanFilter:
         self.p_covariance = (1 - kalman_gain) * self.p_covariance
         return self.x_estimated
 
-# --- 2. BIOCALIBRAÇÃO: CAMADA DE COMPENSAÇÃO DO ÂNGULO KAPPA ---
-class OcularBiocalibrator:
-    """
-    Gerencia a calibração individual do eixe visual do paciente.
-    Determina o vetor de deslocamento sistemático (Ângulo Kappa) para obter precisão absoluta.
-    """
+# --- 2. REGRESSÃO RIDGE (TIKHONOV) PARA EVITAR OVERFITTING ---
+class RegularizedSurfaceCalibrator:
     def __init__(self):
-        self.is_calibrated = False
-        self.kappa_offsets = {
-            "left": {"horizontal": 0.0, "vertical": 0.0},
-            "right": {"horizontal": 0.0, "vertical": 0.0}
-        }
-        self.calibration_buffer = {"left_h": [], "left_v": [], "right_h": [], "right_v": []}
-        self.max_calibration_frames = 15 # Estabilização estatística rápida (~0.5s a 30fps)
+        self.is_surface_fitted = False
+        self.coeff_left_h = None
+        self.coeff_left_v = None
+        self.coeff_right_h = None
+        self.coeff_right_v = None
+        self.calibration_dataset = deque(maxlen=250)
 
-    def collect_sample(self, raw_left: dict, raw_right: dict):
-        """Acumula amostras enquanto o paciente fixa fixamente o target de calibração central."""
-        if self.is_calibrated:
-            return
-        
-        self.calibration_buffer["left_h"].append(raw_left["horizontal"])
-        self.calibration_buffer["left_v"].append(raw_left["vertical"])
-        self.calibration_buffer["right_h"].append(raw_right["horizontal"])
-        self.calibration_buffer["right_v"].append(raw_right["vertical"])
+    def accumulate_target_samples(self, target_h: float, target_v: float, raw_left: dict, raw_right: dict):
+        self.calibration_dataset.append({
+            "true_h": target_h, "true_v": target_v,
+            "raw_l_h": raw_left["horizontal"], "raw_l_v": raw_left["vertical"],
+            "raw_r_h": raw_right["horizontal"], "raw_r_v": raw_right["vertical"]
+        })
 
-        if len(self.calibration_buffer["left_h"]) >= self.max_calibration_frames:
-            # Consolidação estatística via mediana para rejeitar micro-sacadas indesejadas no processo
-            self.kappa_offsets["left"]["horizontal"] = np.median(self.calibration_buffer["left_h"])
-            self.kappa_offsets["left"]["vertical"] = np.median(self.calibration_buffer["left_v"])
-            self.kappa_offsets["right"]["horizontal"] = np.median(self.calibration_buffer["right_h"])
-            self.kappa_offsets["right"]["vertical"] = np.median(self.calibration_buffer["right_v"])
+    def _build_polynomial_features(self, h: float, v: float) -> list:
+        return [1.0, h, v, h**2, h*v, v**2]
+
+    def fit_surface_ridge_sync(self, alpha: float = 1e-2) -> bool:
+        """
+        Aplica a Regularização Ridge para impedir oscilações selvagens na periferia da tela.
+        Matematicamente: W = (A^T * A + alpha * I)^(-1) * A^T * B
+        """
+        if len(self.calibration_dataset) < 6: # Grau de liberdade mínimo para polinômio quadrático estável
+            return False
+        try:
+            A_l, A_r = [], []
+            B_lh, B_lv, B_rh, B_rv = [], [], [], []
+
+            for data in self.calibration_dataset:
+                A_l.append(self._build_polynomial_features(data["raw_l_h"], data["raw_l_v"]))
+                A_r.append(self._build_polynomial_features(data["raw_r_h"], data["raw_r_v"]))
+                B_lh.append(data["true_h"] - data["raw_l_h"])
+                B_lv.append(data["true_v"] - data["raw_l_v"])
+                B_rh.append(data["true_h"] - data["raw_r_h"])
+                B_rv.append(data["true_v"] - data["raw_r_v"])
+
+            A_l, A_r = np.array(A_l), np.array(A_r)
             
-            self.is_calibrated = True
-            self.calibration_buffer.clear()
+            # Construção da penalidade Ridge (Identidade modificada)
+            I_matrix = np.eye(6)
+            I_matrix[0, 0] = 0.0 # Não penaliza o termo de intercepto (offset estático)
 
-    def apply_compensation(self, raw_left: dict, raw_right: dict) -> tuple:
-        """
-        Aplica a transformação matemática inversa para alinhar o eixo pupilar ao eixo visual real.
-        $$\theta_{\text{corrected}} = \theta_{\text{raw}} - \kappa$$
-        """
-        if not self.is_calibrated:
+            # Resolução analítica regularizada estável
+            self.coeff_left_h = np.linalg.solve(A_l.T @ A_l + alpha * I_matrix, A_l.T @ B_lh)
+            self.coeff_left_v = np.linalg.solve(A_l.T @ A_l + alpha * I_matrix, A_l.T @ B_lv)
+            self.coeff_right_h = np.linalg.solve(A_r.T @ A_r + alpha * I_matrix, A_r.T @ B_r)
+            self.coeff_right_v = np.linalg.solve(A_r.T @ A_r + alpha * I_matrix, A_r.T @ B_rv)
+
+            self.is_surface_fitted = True
+            return True
+        except Exception:
+            return False
+
+    def evaluate_compensated_axis(self, raw_left: dict, raw_right: dict) -> tuple:
+        if not self.is_surface_fitted:
             return raw_left, raw_right, False
 
+        feat_l = self._build_polynomial_features(raw_left["horizontal"], raw_left["vertical"])
+        feat_r = self._build_polynomial_features(raw_right["horizontal"], raw_right["vertical"])
+
         corrected_left = {
-            "horizontal": round(raw_left["horizontal"] - self.kappa_offsets["left"]["horizontal"], 2),
-            "vertical": round(raw_left["vertical"] - self.kappa_offsets["left"]["vertical"], 2)
+            "horizontal": raw_left["horizontal"] + float(np.dot(feat_l, self.coeff_left_h)),
+            "vertical": raw_left["vertical"] + float(np.dot(feat_l, self.coeff_left_v))
         }
         corrected_right = {
-            "horizontal": round(raw_right["horizontal"] - self.kappa_offsets["right"]["horizontal"], 2),
-            "vertical": round(raw_right["vertical"] - self.kappa_offsets["right"]["vertical"], 2)
+            "horizontal": raw_right["horizontal"] + float(np.dot(feat_r, self.coeff_right_h)),
+            "vertical": raw_right["vertical"] + float(np.dot(feat_r, self.coeff_right_v))
         }
         return corrected_left, corrected_right, True
 
     def reset(self):
-        self.is_calibrated = False
-        self.kappa_offsets = {"left": {"horizontal": 0.0, "vertical": 0.0}, "right": {"horizontal": 0.0, "vertical": 0.0}}
-        self.calibration_buffer = {"left_h": [], "left_v": [], "right_h": [], "right_v": []}
+        self.is_surface_fitted = False
+        self.calibration_dataset.clear()
 
-# --- 3. BIOMECAÂNICA: AVALIADOR CINEMÁTICO ---
-class OcularKinematicsEvaluator:
-    def __init__(self, window_size=30):
-        self.history_left = deque(maxlen=window_size)
-        self.history_right = deque(maxlen=window_size)
-        self.MAX_PHYSIOLOGICAL_VELOCITY = 800.0  
+# --- 3. ADAPTAÇÃO ANTROPOMÉTRICA DA MORFOLOGIA CRANIANA ---
+class CranialMorphologyAdapter:
+    def __init__(self):
+        self.BASE_FACE_MODEL_3D = np.array([
+            [0.0, 0.0, 0.0], [0.0, -63.6, -12.5], [-43.3, 32.7, -26.0],
+            [43.3, 32.7, -26.0], [-28.9, -28.9, -24.1], [28.9, -28.9, -24.1]
+        ], dtype=np.float64)
 
-    def _calculate_eye_kinematics(self, history, h_curr, v_curr, t_curr):
-        kinematics = {"velocity_deg_s": 0.0, "acceleration_deg_s2": 0.0, "behavior": "Stable Fixation", "valid_signal": True}
-        v_angular = 0.0
+    def generate_personalized_mesh(self, landmarks, width: int, height: int) -> tuple:
+        p_left_eye = np.array([landmarks[33].x * width, landmarks[33].y * height])
+        p_right_eye = np.array([landmarks[263].x * width, landmarks[263].y * height])
         
-        if len(history) > 0:
-            t_prev, h_prev, v_prev, vel_prev = history[-1]
-            dt = t_curr - t_prev
+        observed_2d_distance = np.linalg.norm(p_left_eye - p_right_eye)
+        scale_factor = np.clip(observed_2d_distance / 110.0, 0.65, 1.3) if observed_2d_distance > 0 else 1.0
 
-            if dt > 0.0001:
-                dh = h_curr - h_prev
-                dv = v_curr - v_prev
-                v_angular = math.sqrt(dh**2 + dv**2) / dt
-                
-                if v_angular > self.MAX_PHYSIOLOGICAL_VELOCITY:
-                    kinematics["behavior"] = "Tracking Artifact / Teleportation"
-                    kinematics["valid_signal"] = False
-                    return kinematics
+        scaled_model = self.BASE_FACE_MODEL_3D * scale_factor
+        center_left_3d = np.array([-32.0, 32.7, -28.0], dtype=np.float64) * scale_factor
+        center_right_3d = np.array([32.0, 32.7, -28.0], dtype=np.float64) * scale_factor
+        return scaled_model, center_left_3d, center_right_3d, 12.0 * scale_factor, round(scale_factor, 2)
 
-                a_angular = (v_angular - vel_prev) / dt
-                kinematics["velocity_deg_s"] = round(v_angular, 2)
-                kinematics["acceleration_deg_s2"] = round(a_angular, 2)
-
-                if v_angular > 280.0:
-                    kinematics["behavior"] = "Saccade"
-                elif v_angular > 40.0 and abs(a_angular) > 500.0:
-                    kinematics["behavior"] = "Nystagmus Phase / Micro-correction"
-                elif v_angular < 8.0:
-                    kinematics["behavior"] = "Stable Fixation"
-                else:
-                    kinematics["behavior"] = "Smooth Pursuit / Drift"
-                    
-        history.append((t_curr, h_curr, v_curr, v_angular))
-        return kinematics
-
-    def analyze(self, left_angles: dict, right_angles: dict) -> dict:
-        t_current = time.perf_counter()
-        return {
-            "left_eye": self._calculate_eye_kinematics(self.history_left, left_angles["horizontal"], left_angles["vertical"], t_current),
-            "right_eye": self._calculate_eye_kinematics(self.history_right, right_angles["horizontal"], right_angles["vertical"], t_current)
-        }
-
-# --- 4. MOTOR DE SESSÃO CLÍNICA ESPACIAL BIOCALIBRADO ---
+# --- 4. ENGINE DE EXTRAÇÃO E KINEMATICS AVANÇADA ---
 class OcularTrackingSession:
     def __init__(self):
         self.face_mesh = mp_face_mesh.FaceMesh(
             static_image_mode=False, max_num_faces=1, refine_landmarks=True,
             min_detection_confidence=0.7, min_tracking_confidence=0.7
         )
-        
         self.pose_filters = {
-            "rvec_0": OcularKalmanFilter(q_process_noise=1e-5, r_measure_noise=1e-2),
-            "rvec_1": OcularKalmanFilter(q_process_noise=1e-5, r_measure_noise=1e-2),
-            "rvec_2": OcularKalmanFilter(q_process_noise=1e-5, r_measure_noise=1e-2),
-            "tvec_0": OcularKalmanFilter(q_process_noise=1e-4, r_measure_noise=1e-1),
-            "tvec_1": OcularKalmanFilter(q_process_noise=1e-4, r_measure_noise=1e-1),
-            "tvec_2": OcularKalmanFilter(q_process_noise=1e-4, r_measure_noise=1e-1)
+            f"{var}_{i}": OcularKalmanFilter(q_process_noise=1e-5 if var=="rvec" else 1e-4, r_measure_noise=1e-2 if var=="rvec" else 1e-1)
+            for var in ["rvec", "tvec"] for i in range(3)
         }
-
-        self.iris_filters = {
-            "lx": OcularKalmanFilter(), "ly": OcularKalmanFilter(),
-            "rx": OcularKalmanFilter(), "ry": OcularKalmanFilter()
-        }
+        self.iris_filters = {f"{eye}_{ax}": OcularKalmanFilter() for eye in ["l", "r"] for ax in ["x", "y"]}
+        self.smooth_filters = {f"{eye}_{ax}": OcularKalmanFilter(q_process_noise=1e-3, r_measure_noise=5e-2) for eye in ["l", "r"] for ax in ["h", "v"]}
         
-        self.biocalibrator = OcularBiocalibrator()
-        self.kinematics_engine = OcularKinematicsEvaluator(window_size=30)
-        self.EYEBALL_RADIUS_MM = 12.0
+        self.morphology_adapter = CranialMorphologyAdapter()
+        self.surface_calibrator = RegularizedSurfaceCalibrator()
+        
+        # Estado Histórico para Derivação Cinemática de Alta Precisão
+        self.last_timestamp = None
+        self.last_head_pose = {"pitch": 0.0, "yaw": 0.0}
+        self.last_blink_metric = 0.030
+        
+        self.cached_width, self.cached_height = 0, 0
+        self.camera_matrix, self.K_inv = None, None
 
-        self.FACE_MODEL_3D = np.array([
-            [0.0, 0.0, 0.0], [0.0, -63.6, -12.5], [-43.3, 32.7, -26.0],
-            [43.3, 32.7, -26.0], [-28.9, -28.9, -24.1], [28.9, -28.9, -24.1]
-        ], dtype=np.float64)
+    def _update_camera_cache(self, width: int, height: int):
+        if width == self.cached_width and height == self.cached_height:
+            return
+        self.cached_width, self.cached_height = width, height
+        focal_length = (width / 2.0) / math.tan(math.radians(60.0) / 2.0)
+        self.camera_matrix = np.array([[focal_length, 0, width / 2.0], [0, focal_length, height / 2.0], [0, 0, 1]], dtype=np.float64)
+        self.K_inv = np.linalg.inv(self.camera_matrix)
 
-        self.LEFT_EYEBALL_CENTER_3D = np.array([-32.0, 32.7, -28.0], dtype=np.float64)
-        self.RIGHT_EYEBALL_CENTER_3D = np.array([32.0, 32.7, -28.0], dtype=np.float64)
-
-    def _intersect_ray_sphere(self, ray_direction, sphere_center_camera):
+    def _intersect_ray_sphere(self, ray_direction, sphere_center_camera, radius):
         dot_dc = np.dot(ray_direction, sphere_center_camera)
         mag_c2 = np.dot(sphere_center_camera, sphere_center_camera)
-        discriminant = (dot_dc ** 2) - mag_c2 + (self.EYEBALL_RADIUS_MM ** 2)
+        discriminant = (dot_dc ** 2) - mag_c2 + (radius ** 2)
         if discriminant < 0:
-            return sphere_center_camera + (ray_direction * self.EYEBALL_RADIUS_MM)
-        t = dot_dc - math.sqrt(discriminant)
-        return ray_direction * t
+            return sphere_center_camera + (ray_direction * radius)
+        return ray_direction * (dot_dc - math.sqrt(discriminant))
 
-    def process_frame(self, frame_bytes: bytes, trigger_calibration: bool = False) -> dict:
+    def process_frame(self, frame_bytes: bytes, client_timestamp: float, current_target: dict = None) -> dict:
+        t_start = time.perf_counter()
+        
         np_array = np.frombuffer(frame_bytes, np.uint8)
         image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-        
         if image is None:
             return {"face_detected": False, "status": "corrupted_frame"}
 
         height, width, _ = image.shape
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = self.face_mesh.process(rgb_image)
+        processing_width = 640
+        processing_height = int(height * (processing_width / width))
+        resized_image = cv2.resize(image, (processing_width, processing_height), interpolation=cv2.INTER_LINEAR)
+        self._update_camera_cache(processing_width, processing_height)
 
+        results = self.face_mesh.process(cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB))
         if not results.multi_face_landmarks:
-            return {"face_detected": False, "status": "no_face_tracked"}
+            return {"face_detected": False, "status": "no_face_tracked", "confidence": 0.0}
 
         landmarks = results.multi_face_landmarks[0].landmark
 
-        # Gating de Piscada
-        p_le_top, p_le_bottom = landmarks[159], landmarks[145]
-        if math.sqrt((p_le_top.x - p_le_bottom.x)**2 + (p_le_top.y - p_le_bottom.y)**2) < 0.015:
-            return {"face_detected": True, "status": "blink_detected"}
-
-        image_points = np.array([
-            [landmarks[1].x * width, landmarks[1].y * height], [landmarks[152].x * width, landmarks[152].y * height],
-            [landmarks[33].x * width, landmarks[33].y * height], [landmarks[263].x * width, landmarks[263].y * height],
-            [landmarks[61].x * width, landmarks[61].y * height], [landmarks[291].x * width, landmarks[291].y * height]
-        ], dtype=np.float64)
-
-        # OTIMIZAÇÃO GEOMÉTRICA: Matriz Intrínseca Adaptativa baseada em fov tangencial clínico (~60°)
-        # Substitui a aproximação linear estática width pura por enquadramento de lente padrão.
-        fov_rad = math.radians(60.0)
-        focal_length_adaptive = (width / 2.0) / math.tan(fov_rad / 2.0)
-        center_x, center_y = width / 2.0, height / 2.0
+        # CINEMÁTICA PALPEBRAL (Blink Velocity Estimation)
+        blink_metric = math.sqrt((landmarks[159].x - landmarks[145].x)**2 + (landmarks[159].y - landmarks[145].y)**2)
         
-        camera_matrix = np.array([
-            [focal_length_adaptive, 0, center_x],
-            [0, focal_length_adaptive, center_y],
-            [0, 0, 1]
-        ], dtype=np.float64)
-        dist_coeffs = np.zeros((4, 1), dtype=np.float64)
+        dt = (client_timestamp - self.last_timestamp) if self.last_timestamp else 0.033
+        if dt <= 0: dt = 0.001 # Proteção contra estouro de divisão por zero
+        
+        blink_velocity = (blink_metric - self.last_blink_metric) / dt
+        self.last_blink_metric = blink_metric
 
-        success, rvec_raw, tvec_raw = cv2.solvePnP(
-            self.FACE_MODEL_3D, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE
-        )
+        if blink_metric < 0.015 or abs(blink_velocity) > 1.5: # Ejeção por dinâmica de fechamento rápido
+            self.last_timestamp = client_timestamp
+            return {"face_detected": True, "status": "blink_or_saccade_rejection", "confidence": 0.0}
 
+        face_model_3d, left_eye_center_3d, right_eye_center_3d, current_radius, morph_scale = self.morphology_adapter.generate_personalized_mesh(landmarks, processing_width, processing_height)
+        image_points = np.array([[landmarks[idx].x * processing_width, landmarks[idx].y * processing_height] for idx in [1, 152, 33, 263, 61, 291]], dtype=np.float64)
+
+        success, rvec_raw, tvec_raw = cv2.solvePnP(face_model_3d, image_points, self.camera_matrix, np.zeros((4, 1)), flags=cv2.SOLVEPNP_EPNP)
         if not success:
-            return {"face_detected": True, "status": "pnp_geometry_failed"}
+            return {"face_detected": True, "status": "pnp_failed", "confidence": 0.0}
 
-        # Suavização da Pose Espacial contra micro-oscilações
         rvec = np.array([self.pose_filters[f"rvec_{i}"].filter(rvec_raw[i][0]) for i in range(3)]).reshape((3, 1))
         tvec = np.array([self.pose_filters[f"tvec_{i}"].filter(tvec_raw[i][0]) for i in range(3)]).reshape((3, 1))
-
         R, _ = cv2.Rodrigues(rvec)
-        z_depth_cm = float(tvec[2]) / 10.0
 
-        # Mapeamento de Centros dos Globos Oculares no espaço tridimensional
-        center_left_cam = R @ self.LEFT_EYEBALL_CENTER_3D + tvec.flatten()
-        center_right_cam = R @ self.RIGHT_EYEBALL_CENTER_3D + tvec.flatten()
+        pitch = math.degrees(math.atan2(-R[1, 2], R[2, 2]))
+        yaw = math.degrees(math.atan2(R[0, 2], math.sqrt(R[1, 2]**2 + R[2, 2]**2)))
 
-        # Coordenadas da Íris filtradas em 2D
-        l_iris_x = self.iris_filters["lx"].filter(landmarks[468].x * width)
-        l_iris_y = self.iris_filters["ly"].filter(landmarks[468].y * height)
-        r_iris_x = self.iris_filters["rx"].filter(landmarks[473].x * width)
-        r_iris_y = self.iris_filters["ry"].filter(landmarks[473].y * height)
-
-        # Construção de Raios Ópticos Unitários (Ray-Casting)
-        K_inv = np.linalg.inv(camera_matrix)
-        ray_left = K_inv @ np.array([l_iris_x, l_iris_y, 1.0])
-        ray_left /= np.linalg.norm(ray_left)
-        ray_right = K_inv @ np.array([r_iris_x, r_iris_y, 1.0])
-        ray_right /= np.linalg.norm(ray_right)
-
-        # Interseção Raio-Esfera
-        p_iris_left_cam = self._intersect_ray_sphere(ray_left, center_left_cam)
-        p_iris_right_cam = self._intersect_ray_sphere(ray_right, center_right_cam)
-
-        # Projeção Inversa para o espaço isolado do crânio
-        p_iris_left_cranial = R.T @ (p_iris_left_cam - tvec.flatten())
-        p_iris_right_cranial = R.T @ (p_iris_right_cam - tvec.flatten())
-
-        # Vetor de Olhar Puro (Eixo Óptico Bruto)
-        v_gaze_left = (p_iris_left_cranial - self.LEFT_EYEBALL_CENTER_3D) / self.EYEBALL_RADIUS_MM
-        v_gaze_right = (p_iris_right_cranial - self.RIGHT_EYEBALL_CENTER_3D) / self.EYEBALL_RADIUS_MM
-
-        raw_angles_left = {
-            "horizontal": math.degrees(math.atan2(v_gaze_left[0], v_gaze_left[2])),
-            "vertical": math.degrees(math.atan2(v_gaze_left[1], v_gaze_left[2]))
-        }
-        raw_angles_right = {
-            "horizontal": math.degrees(math.atan2(v_gaze_right[0], v_gaze_right[2])),
-            "vertical": math.degrees(math.atan2(v_gaze_right[1], v_gaze_right[2]))
-        }
-
-        # IMPLEMENTAÇÃO PRIORITÁRIA: Gerenciamento do Estado de Biocalibração do Eixo Visual
-        if trigger_calibration and not self.biocalibrator.is_calibrated:
-            self.biocalibrator.collect_sample(raw_angles_left, raw_angles_right)
-
-        # Aplicação da Compensação Real do Ângulo Kappa
-        left_angles, right_angles, calibration_active = self.biocalibrator.apply_compensation(
-            raw_angles_left, raw_angles_right
-        )
-
-        kinematics_report = self.kinematics_engine.analyze(left_angles, right_angles)
-
-        # Avaliação Clínica Avançada baseada no Eixo Visual Real Compensado
-        alignment_str = "Ortoforia (Alinhamento Visual Normal)"
-        desvio_limiar = 4.5  
-        diff_horizontal = left_angles["horizontal"] - right_angles["horizontal"]
+        # CINEMÁTICA CEFÁLICA (Head Angular Velocity Tracking)
+        yaw_velocity = (yaw - self.last_head_pose["yaw"]) / dt
+        pitch_velocity = (pitch - self.last_head_pose["pitch"]) / dt
         
-        if diff_horizontal > desvio_limiar:
-            alignment_str = "Assimetria Binocular (Suspeita de Exotropia)"
-        elif diff_horizontal < -desvio_limiar:
-            alignment_str = "Assimetria Binocular (Suspeita de Esotropia)"
+        self.last_head_pose = {"pitch": pitch, "yaw": yaw}
+        self.last_timestamp = client_timestamp
 
-        # CORREÇÃO DO BUG PYTHON: Booleanos convertidos explicitamente para True nativo
+        # REAQUISIÇÃO GEOMÉTRICA DO VETOR UNITÁRIO
+        center_left_cam = R @ left_eye_center_3d + tvec.flatten()
+        center_right_cam = R @ right_eye_center_3d + tvec.flatten()
+
+        l_ray = self.K_inv @ np.array([self.iris_filters["l_x"].filter(landmarks[468].x * processing_width), self.iris_filters["l_y"].filter(landmarks[468].y * processing_height), 1.0])
+        r_ray = self.K_inv @ np.array([self.iris_filters["r_x"].filter(landmarks[473].x * processing_width), self.iris_filters["r_y"].filter(landmarks[473].y * processing_height), 1.0])
+        l_ray /= np.linalg.norm(l_ray)
+        r_ray /= np.linalg.norm(r_ray)
+
+        v_gaze_left = (R.T @ (self._intersect_ray_sphere(l_ray, center_left_cam, current_radius) - tvec.flatten())) - left_eye_center_3d
+        v_gaze_right = (R.T @ (self._intersect_ray_sphere(r_ray, center_right_cam, current_radius) - tvec.flatten())) - right_eye_center_3d
+        v_gaze_left /= np.linalg.norm(v_gaze_left)
+        v_gaze_right /= np.linalg.norm(v_gaze_right)
+
+        raw_l = {"horizontal": math.degrees(math.atan2(v_gaze_left[0], v_gaze_left[2])), "vertical": math.degrees(math.atan2(v_gaze_left[1], v_gaze_left[2]))}
+        raw_r = {"horizontal": math.degrees(math.atan2(v_gaze_right[0], v_gaze_right[2])), "vertical": math.degrees(math.atan2(v_gaze_right[1], v_gaze_right[2]))}
+
+        if current_target is not None:
+            self.surface_calibrator.accumulate_target_samples(current_target["h"], current_target["v"], raw_l, raw_r)
+
+        left_angles, right_angles, surface_active = self.surface_calibrator.evaluate_compensated_axis(raw_l, raw_r)
+
+        # SUAVIZAÇÃO ALÉM DO RIDGE REGRESSION
+        left_angles["horizontal"] = round(self.smooth_filters["l_h"].filter(left_angles["horizontal"]), 2)
+        left_angles["vertical"] = round(self.smooth_filters["l_v"].filter(left_angles["vertical"]), 2)
+        right_angles["horizontal"] = round(self.smooth_filters["r_h"].filter(right_angles["horizontal"]), 2)
+        right_angles["vertical"] = round(self.smooth_filters["r_v"].filter(right_angles["vertical"]), 2)
+
+        # CÁLCULO DA CONFIANÇA MATEMÁTICA MULTI-VARIÁVEL DA v10.0.0
+        head_penalty = max(0.0, (abs(yaw) - 20.0) / 20.0) + max(0.0, (abs(pitch) - 15.0) / 15.0)
+        # Nova penalização por velocidade cinética (movimentos rápidos destroem a acurácia do tracking)
+        velocity_penalty = max(0.0, (abs(yaw_velocity) - 40.0) / 40.0) + max(0.0, (abs(pitch_velocity) - 40.0) / 40.0)
+        
+        tracking_confidence = np.clip(1.0 - (head_penalty + velocity_penalty), 0.0, 1.0)
+        diff_horizontal = left_angles["horizontal"] - right_angles["horizontal"]
+
         return {
             "face_detected": True,
-            "status": "tracking_active",
-            "biocalibration_applied": calibration_active,
-            "head_telemetry": {
-                "distance_cm": round(z_depth_cm, 1),
-                "pitch_deg": round(math.degrees(math.atan2(-R[1, 2], R[2, 2])), 1),
-                "yaw_deg": round(math.degrees(math.atan2(R[0, 2], math.sqrt(R[1, 2]**2 + R[2, 2]**2))), 1),
-                "roll_deg": round(math.degrees(math.atan2(-R[0, 1], R[0, 0])), 1)
+            "tracking_confidence": round(float(tracking_confidence), 2),
+            "latency_internal_ms": round((time.perf_counter() - t_start) * 1000.0, 2),
+            "kinematics": {
+                "head_yaw_velocity_deg_s": round(yaw_velocity, 1),
+                "eyelid_velocity_px_s": round(blink_velocity, 2)
             },
-            "visual_axis_metrics_deg": {
-                "left_eye": left_angles,
-                "right_eye": right_angles,
-                "kappa_offsets_applied": self.biocalibrator.kappa_offsets
-            },
-            "kinematics_analysis": kinematics_report,
+            "cranial_morphology_scale": morph_scale,
+            "surface_calibration_fitted": surface_active,
+            "visual_axis_surface_deg": {"left_eye": left_angles, "right_eye": right_angles},
             "clinical_evaluation": {
-                "status": alignment_str,
+                "status": "Ortoforia" if abs(diff_horizontal) <= 4.5 else ("Suspeita de Exotropia" if diff_horizontal > 4.5 else "Suspeita de Esotropia"),
                 "inter_ocular_diff_deg": round(abs(diff_horizontal), 2)
             }
         }
@@ -320,30 +281,41 @@ class OcularTrackingSession:
     def close(self):
         self.face_mesh.close()
 
-# --- 5. ENDPOINT WEBSOCKET SEGURO COM COMANDO DE CALIBRAÇÃO DE FRAME ---
+# --- 5. ENDPOINT WEBSOCKET BIFÁSICO ---
 @app.websocket("/tracking/stream")
 async def websocket_tracking_endpoint(websocket: WebSocket):
     await websocket.accept()
     session = OcularTrackingSession()
-    print("🚀 Engine v5.0.0 Estável. Camada de Biocalibração Visual (Ângulo Kappa) Armada.")
+    current_target = None
+    print("🚀 Engine v10.0.0 Online. Regularização Ridge e Filtro de Cinemática Ativos.")
 
     try:
         while True:
-            # O protocolo espera um frame binário. Para ativar a calibração, o front-end pode enviar
-            # uma mensagem de texto inicial or simplesmente controlamos via query param. 
-            # Para manter o stream binário de alta performance, checamos se o estado precisa calibrar.
-            data = await websocket.receive_bytes()
+            message = await websocket.receive()
+            if "text" in message:
+                import json
+                command_data = json.loads(message["text"])
+                command = command_data.get("command")
+                if command == "SET_TARGET":
+                    current_target = command_data.get("target")
+                elif command == "CLEAR_TARGET":
+                    current_target = None
+                elif command == "FIT_SURFACE":
+                    # Despacha o cálculo regularizado Ridge para worker thread dedicada
+                    success = await asyncio.to_thread(session.surface_calibrator.fit_surface_ridge_sync, 1e-2)
+                    await websocket.send_json({"status": "surface_fitting_completed", "success": success})
+                elif command == "RESET_CALIBRATION":
+                    session.surface_calibrator.reset()
+                    await websocket.send_json({"status": "calibration_wiped"})
             
-            # Se o calibrador ainda não concluiu, os primeiros frames alimentam a matriz Kappa automaticamente
-            auto_calibrate = not session.biocalibrator.is_calibrated
-            
-            analysis_result = session.process_frame(data, trigger_calibration=auto_calibrate)
-            await websocket.send_json(analysis_result)
-            
+            elif "bytes" in message:
+                payload = message["bytes"]
+                if len(payload) < 8: continue
+                client_timestamp = struct.unpack("d", payload[:8])[0]
+                analysis_result = session.process_frame(payload[8:], client_timestamp, current_target=current_target)
+                await websocket.send_json(analysis_result)
+                
     except WebSocketDisconnect:
-        print("🛑 Conexão encerrada pelo cliente.")
-    except Exception as e:
-        print(f"⚠️ Exceção no pipeline biomecânico: {str(e)}")
+        print("🛑 Sessão clínica encerrada.")
     finally:
         session.close()
-        print("🧹 Alocações C++ e buffers do calibrador limpos com sucesso.")
