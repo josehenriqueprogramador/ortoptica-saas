@@ -21,7 +21,7 @@ Plataforma HealthTech com IA para análise ortóptica, tracking ocular e process
 
 ## 🧠 Arquitetura
 
-``` id="1q7d3j"
+```text
 Flutter/Web
      ↓
 Laravel API Gateway
@@ -31,13 +31,13 @@ FastAPI IA Service
 MediaPipe/OpenCV
      ↓
 Qdrant + MySQL + Redis
+```
 
 ---
 
 ## 👨‍💻 Autor
 
-**José Henrique Jardim**  
-Desenvolvedor de Software | Data Science  
+**José Henrique Jardim** Desenvolvedor de Software | Data Science  
 
 🔗 LinkedIn: https://linkedin.com/in/jose-jardim-764143247
 
@@ -47,7 +47,10 @@ Desenvolvedor de Software | Data Science
 
 ## 📺 Processo de Desenvolvimento
 
-[![Assista no YouTube](https://img.youtube.com/vi/4j0y1g531aM/0.jpg)](https://youtu.be/4j0y1g531aM)
+<div align="center">
+  <a href="https://youtu.be/4j0y1g531aM" target="_blank">
+    <img src="https://i.ytimg.com/vi/4j0y1g531aM/maxresdefault.jpg" alt="Assista no YouTube" width="100%" style="max-width: 600px; border-radius: 10px; box-shadow: 0px 4px 12px rgba(0,0,0,0.25);">
+  </a>
+</div>
 
 ---
-
