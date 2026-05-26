@@ -344,8 +344,8 @@ https://youtube.com/@caminho_do_codigo
 
 <a href="https://youtu.be/Oo37ZGVPvNA" target="_blank">
   <img 
-    src="https://i.ytimg.com/vi/Oo37ZGVPvNA/maxresdefault.jpg"
-    alt="Assista no YouTube"
+    src="https://i.ytimg.com/vi/Oo37ZGVPvNA.jpg"
+   alt="Assista no YouTube"
     width="100%"
     style="max-width: 900px; border-radius: 14px; box-shadow: 0px 6px 20px rgba(0,0,0,0.35);"
   >
