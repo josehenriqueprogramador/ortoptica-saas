@@ -335,6 +335,21 @@ https://linkedin.com/in/jose-jardim-764143247
 📺 YouTube  
 https://youtube.com/@caminho_do_codigo
 
+# 📺 Processo de Desenvolvimento
+
+<div align="center">
+
+<a href="https://youtu.be/Oo37ZGVPvNA" target="_blank">
+  <img 
+    src="docs/thumbnail-video.jpg"
+    alt="Assista no YouTube"
+    width="100%"
+    style="max-width: 900px; border-radius: 14px; box-shadow: 0px 6px 20px rgba(0,0,0,0.35);"
+  >
+</a>
+
+</div>
+
 ---
 # 📺 Regra de Negócio
 
