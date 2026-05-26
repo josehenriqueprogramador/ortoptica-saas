@@ -51,7 +51,7 @@ Sistema antropométrico dinâmico que:
 Engine matemática baseada em:
 
 - Regressão polinomial bivariada
-- Mínimos quadrados (Least Squares)
+- Regressão Ridge (Regularização de Tikhonov)
 - Compensação dinâmica do ângulo kappa
 - Correção espacial do eixo visual
 
@@ -60,6 +60,8 @@ Modelo utilizado:
 ```math
 f(h,v)=c0+c1h+c2v+c3h²+c4hv+c5v²
 ```
+
+Com penalização Alpha contra overfitting periférico e instabilidades geométricas em excentricidades elevadas do campo visual.
 
 ---
 
@@ -72,6 +74,8 @@ Sistema de sincronização temporal de alta precisão:
 - Métrica de latência interna
 - Suavização temporal com Kalman
 - Cache de matriz intrínseca da câmera
+- Compensação temporal dinâmica
+- Sincronização cliente-servidor em alta frequência
 
 ---
 
@@ -81,9 +85,12 @@ Cálculo matemático de confiabilidade baseado em:
 
 - Pitch craniano
 - Yaw craniano
+- Velocidade cinética cefálica e palpebral
 - Distância do paciente
 - Integridade geométrica facial
-- Detecção de piscadas
+- Detecção e dinâmica fisiológica de piscadas
+- Estabilidade temporal do tracking
+- Penalização biomecânica angular
 
 ---
 
@@ -91,52 +98,91 @@ Cálculo matemático de confiabilidade baseado em:
 
 Infraestrutura otimizada para:
 
-- WebSocket binário
+- WebSocket binário híbrido
 - Processamento cooperativo
 - Alta taxa de transferência
 - Redução de overhead
 - Escalabilidade horizontal
+- Streaming temporal sincronizado
 
 ---
 
 # 🏗️ Arquitetura da Plataforma
 
 ```text
-               ┌──────────────────────┐
-               │ Flutter / React Web │
-               └──────────┬───────────┘
-                          │
-                          ▼
-             ┌─────────────────────────┐
-             │ Laravel API Gateway     │
-             │ Auth • Billing • SaaS   │
-             └──────────┬──────────────┘
-                        │
-                        ▼
-          ┌──────────────────────────────┐
-          │ FastAPI Neuro-Orthoptic Core │
-          │ IA • Tracking • Geometry     │
-          └──────────┬───────────────────┘
-                     │
-     ┌───────────────┼───────────────────┐
-     ▼               ▼                   ▼
-┌──────────┐   ┌──────────┐      ┌──────────┐
-│MediaPipe │   │ OpenCV   │      │ NumPy    │
-│ FaceMesh │   │ Vision   │      │ Algebra  │
-└──────────┘   └──────────┘      └──────────┘
-                     │
-                     ▼
-      ┌─────────────────────────────┐
-      │ Clinical Intelligence Layer │
-      │ Kalman • Surface Modeling   │
-      └──────────┬──────────────────┘
+ ┌──────────────────────────────────────────┐
+ │         Flutter / React Web             │
+ │  UI Clínica • Dashboard • Tracking UI   │
+ └──────────────────┬───────────────────────┘
+                    │
+                    ▼
+      ┌────────────────────────────────┐
+      │      Laravel API Gateway       │
+      │ Auth • SaaS • Billing • ACL    │
+      └────────────────┬───────────────┘
+                       │
+                       ▼
+ ┌──────────────────────────────────────────────┐
+ │      FastAPI Neuro-Orthoptic Engine          │
+ │ IA • Tracking • Geometry • Telemetry         │
+ └───────────────┬──────────────────────────────┘
                  │
-      ┌──────────┼─────────────┐
-      ▼          ▼             ▼
- ┌────────┐ ┌────────┐ ┌────────────┐
- │ Redis  │ │ MySQL  │ │ Qdrant AI │
- │ Cache  │ │ SaaS   │ │ Vectors   │
- └────────┘ └────────┘ └────────────┘
+     ┌───────────┼───────────────────────┐
+     ▼           ▼                       ▼
+┌──────────┐ ┌──────────┐         ┌──────────┐
+│MediaPipe │ │ OpenCV   │         │ NumPy    │
+│ FaceMesh │ │ Vision   │         │ Algebra  │
+└──────────┘ └──────────┘         └──────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────┐
+│      Clinical Intelligence Layer             │
+│ Kalman • Ridge Regression • Surface Model    │
+└────────────────┬─────────────────────────────┘
+                 │
+      ┌──────────┼───────────────┐
+      ▼          ▼               ▼
+ ┌────────┐ ┌────────┐ ┌────────────────┐
+ │ Redis  │ │ MySQL  │ │ Qdrant Vector │
+ │ Cache  │ │ SaaS   │ │ Clinical AI   │
+ └────────┘ └────────┘ └────────────────┘
+```
+
+---
+
+# 🌐 Arquitetura do Protocolo Binário
+
+```text
+Cliente Camera Stream
+        │
+        ▼
+┌────────────────────────────┐
+│ Binary WebSocket Transport │
+└─────────────┬──────────────┘
+              │
+              ▼
+┌────────────────────────────┐
+│ [8 Bytes Timestamp Double] │
+├────────────────────────────┤
+│ JPEG Binary Frame Payload  │
+└─────────────┬──────────────┘
+              │
+              ▼
+┌────────────────────────────┐
+│ Temporal Synchronization   │
+│ Latency Reconstruction     │
+└─────────────┬──────────────┘
+              │
+              ▼
+┌────────────────────────────┐
+│ Neuro-Orthoptic Processing │
+└─────────────┬──────────────┘
+              │
+              ▼
+┌────────────────────────────┐
+│ JSON Clinical Telemetry    │
+│ Confidence • Angles • Sync │
+└────────────────────────────┘
 ```
 
 ---
@@ -157,8 +203,9 @@ Infraestrutura otimizada para:
 - NumPy
 - Álgebra Linear
 - Geometria 3D
-- Regressão Polinomial
+- Ridge Regression
 - Filtros de Kalman
+- Temporal Synchronization
 
 ## Frontend
 - React + Vite
@@ -177,6 +224,8 @@ Infraestrutura otimizada para:
 
 ```text
 Captura de Frame
+        ↓
+Sincronização Temporal
         ↓
 Detecção Facial
         ↓
@@ -224,8 +273,8 @@ Avaliação Clínica
 - Processamento assíncrono
 
 ## Recursos Matemáticos
-- Least Squares
-- Regressão Polinomial
+- Ridge Regression
+- Regularização de Tikhonov
 - Vetores normalizados
 - Geometria espacial
 - Tracking temporal
@@ -233,8 +282,9 @@ Avaliação Clínica
 ## Recursos Clínicos
 - Confidence Score
 - Telemetria sincronizada
-- Detecção fisiológica de piscada
+- Dinâmica fisiológica de piscada
 - Estimativa biométrica craniana
+- Penalização cinética cefálica
 
 ---
 
