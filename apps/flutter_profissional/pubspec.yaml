@@ -1,6 +1,6 @@
-name: flutter_paciente
-environment:
-  sdk: '>=3.0.0 <4.0.0'
 dependencies:
   flutter:
     sdk: flutter
+  camera: ^0.10.5+9 # Acesso ao hardware da câmera
+  web_socket_channel: ^2.4.1 # Comunicação binária com o backend
+  image: ^4.1.3 # Processamento e conversão de formato de imagem

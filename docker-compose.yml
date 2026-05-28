@@ -1,100 +1,134 @@
 version: '3.8'
 
+networks:
+  precision_vision_net:
+    driver: bridge
+
+volumes:
+  mysql_clinical_data:
+  qdrant_vector_store:
+  redis_cache_data:
+
 services:
-  database:
+  # ---------------------------------------------------------------------------
+  # 1. CORE BANCO DE DADOS RELACIONAL (Telemetria Temporal e Logs Clínicos)
+  # ---------------------------------------------------------------------------
+  mysql:
     image: mysql:8.0
-    container_name: saas_db
-    restart: unless-stopped
+    container_name: pv_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_biometric_pass
+      MYSQL_DATABASE: ortoptica_saas
+      MYSQL_USER: pv_clinical_user
+      MYSQL_PASSWORD: clinical_secure_pass
     ports:
       - "3306:3306"
-    environment:
-      MYSQL_DATABASE: ortoptica
-      MYSQL_ROOT_PASSWORD: root
     volumes:
-      - db_data:/var/lib/mysql
+      - mysql_clinical_data:/var/lib/mysql
+    networks:
+      - precision_vision_net
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
-      interval: 10s
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - ortoptica_network
 
+  # ---------------------------------------------------------------------------
+  # 2. REDIS (Controle de Backpressure, Filas de Processamento e Cache do SaaS)
+  # ---------------------------------------------------------------------------
   redis:
-    image: redis:alpine
-    container_name: saas_redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes
+    image: redis:7-alpine
+    container_name: pv_redis
+    restart: always
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis_cache_data:/data
     networks:
-      - ortoptica_network
+      - precision_vision_net
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: saas_backend
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/var/www
-    depends_on:
-      database:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    networks:
-      - ortoptica_network
-
-  ml_service:
-    build:
-      context: ./ml_service
-      dockerfile: Dockerfile
-    container_name: saas_ml
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./ml_service:/app
-    networks:
-      - ortoptica_network
-
-  vector_db:
+  # ---------------------------------------------------------------------------
+  # 3. QDRANT VECTOR DB (Mapeamento Geométrico, Clustering e IA Espacial)
+  # ---------------------------------------------------------------------------
+  qdrant:
     image: qdrant/qdrant:latest
-    container_name: saas_vector
-    restart: unless-stopped
+    container_name: pv_qdrant
+    restart: always
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - ./vector_db/qdrant_storage:/qdrant/storage
+      - qdrant_vector_store:/qdrant/storage
     networks:
-      - ortoptica_network
+      - precision_vision_net
 
+  # ---------------------------------------------------------------------------
+  # 4. ENGINE OFTÁLMICA FASTAPI v11.1.0 (Decoder Binário, MediaPipe e Analytics)
+  # ---------------------------------------------------------------------------
+  ml_service:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile
+    container_name: pv_ml_engine
+    restart: always
+    environment:
+      - DATABASE_URL=mysql+aiomysql://pv_clinical_user:clinical_secure_pass@mysql:3306/ortoptica_saas
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - ENGINE_VERSION=11.1.0
+      - MATH_MODEL=ridge_v2_spatial
+      - MAX_BUFFER_BULK_INSERT=30
+      - APP_ENV=development
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - precision_vision_net
+
+  # ---------------------------------------------------------------------------
+  # 5. LARAVEL GATEWAY & SAAS (Autenticação, Gestão de Clínicas e Laudos PDF)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pv_laravel_gateway
+    restart: always
+    environment:
+      - APP_ENV=local
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=ortoptica_saas
+      - DB_USERNAME=pv_clinical_user
+      - DB_PASSWORD=clinical_secure_pass
+      - ML_ENGINE_URL=http://ml_service:8000
+    ports:
+      - "8080:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - precision_vision_net
+
+  # ---------------------------------------------------------------------------
+  # 6. PAINEL ADMIN REACT (Dashboard Clínico, Heatmaps e Replay de Sessão)
+  # ---------------------------------------------------------------------------
   painel_admin:
     build:
       context: ./painel_admin
       dockerfile: Dockerfile
-    container_name: saas_painel
-    restart: unless-stopped
+    container_name: pv_react_dashboard
+    restart: always
     ports:
       - "3000:3000"
-    volumes:
-      - ./painel_admin:/app
-      - /app/node_modules
+    environment:
+      - VITE_API_GATEWAY_URL=http://localhost:8080
+      - VITE_ENGINE_WS_URL=ws://localhost:8000
     networks:
-      - ortoptica_network
-
-networks:
-  ortoptica_network:
-    driver: bridge
-
-volumes:
-  db_data:
-    driver: local
-  redis_data:
-    driver: local
+      - precision_vision_net
