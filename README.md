@@ -1,4 +1,4 @@
-# 👁️ Neuro-Orthoptic AI SaaS Platform
+# 👁️ PRECISION VISION — Neuro-Orthoptic AI Platform
 
 Plataforma HealthTech avançada para análise ortóptica inteligente, rastreamento ocular de alta precisão, modelagem biométrica craniana e processamento clínico em tempo real utilizando Inteligência Artificial, visão computacional e geometria espacial 3D.
 
@@ -6,17 +6,19 @@ Plataforma HealthTech avançada para análise ortóptica inteligente, rastreamen
 
 # 🚀 Visão Geral
 
-O projeto foi desenvolvido para atuar como uma infraestrutura moderna de neuro-ortóptica digital, capaz de realizar:
+O PRECISION VISION foi desenvolvido como uma infraestrutura moderna de neuro-ortóptica digital capaz de executar:
 
-- Tracking ocular binocular em tempo real
+- Eye tracking binocular em tempo real
 - Reconstrução geométrica da direção visual
 - Estimativa biomecânica craniana adaptativa
 - Calibração polinomial não-linear da superfície visual
 - Correção dinâmica do eixo visual
-- Detecção de estrabismo
+- Detecção computadorizada de estrabismo
 - Telemetria clínica de alta frequência
-- Pipeline assíncrono de baixa latência
 - Processamento temporal sincronizado
+- Pipeline assíncrono de baixa latência
+- Consolidação diagnóstica automatizada
+- Replay clínico longitudinal auditável
 - Infraestrutura SaaS escalável para HealthTech
 
 ---
@@ -28,10 +30,11 @@ O projeto foi desenvolvido para atuar como uma infraestrutura moderna de neuro-o
 Reconstrução vetorial da direção visual de ambos os olhos utilizando:
 
 - MediaPipe FaceMesh
-- Interseção geométrica raio-esfera
 - SolvePnP
+- Interseção geométrica raio-esfera
 - Álgebra linear espacial
 - Vetores normalizados em espaço craniano
+- Correção biomecânica adaptativa
 
 ---
 
@@ -40,9 +43,10 @@ Reconstrução vetorial da direção visual de ambos os olhos utilizando:
 Sistema antropométrico dinâmico que:
 
 - Escala automaticamente o modelo facial
-- Ajusta o tamanho ocular conforme a morfologia do paciente
+- Ajusta virtualmente o tamanho ocular
+- Compensa diferenças morfológicas
 - Corrige distorções volumétricas
-- Reduz erro geométrico entre pacientes infantis e adultos
+- Reduz erro geométrico entre faixas etárias
 
 ---
 
@@ -51,31 +55,57 @@ Sistema antropométrico dinâmico que:
 Engine matemática baseada em:
 
 - Regressão polinomial bivariada
-- Regressão Ridge (Regularização de Tikhonov)
-- Compensação dinâmica do ângulo kappa
-- Correção espacial do eixo visual
+- Ridge Regression
+- Regularização de Tikhonov
+- Correção do ângulo kappa
+- Correção espacial dinâmica do gaze
 
-Modelo utilizado:
+Modelo matemático:
 
 ```math
 f(h,v)=c0+c1h+c2v+c3h²+c4hv+c5v²
 ```
 
-Com penalização Alpha contra overfitting periférico e instabilidades geométricas em excentricidades elevadas do campo visual.
+Com penalização Alpha contra:
+
+- Overfitting periférico
+- Instabilidades geométricas
+- Drift espacial em excentricidades elevadas
 
 ---
 
 ## ✅ Pipeline Temporal Inteligente
 
-Sistema de sincronização temporal de alta precisão:
+Sistema temporal de precisão clínica:
 
-- Timestamp binário embutido no frame
+- Timestamp binário embutido nos frames
+- Aquisição temporal sincronizada
 - Processamento assíncrono
 - Métrica de latência interna
-- Suavização temporal com Kalman
-- Cache de matriz intrínseca da câmera
+- Suavização temporal via Kalman
+- Cache da matriz intrínseca da câmera
 - Compensação temporal dinâmica
-- Sincronização cliente-servidor em alta frequência
+- Gating temporal clínico
+- Reconstrução temporal auditável
+
+---
+
+## ✅ Replay Clínico Longitudinal
+
+Arquitetura preparada para auditoria científica:
+
+- Persistência temporal das sessões
+- Rastreabilidade matemática
+- Assinatura de engine_version
+- Histórico de modelos estatísticos
+- Consolidação determinística
+- Compatibilidade futura com replay clínico
+
+Exemplo:
+
+```text
+11.1.0|ridge_v2_spatial_bcea
+```
 
 ---
 
@@ -85,12 +115,53 @@ Cálculo matemático de confiabilidade baseado em:
 
 - Pitch craniano
 - Yaw craniano
-- Velocidade cinética cefálica e palpebral
+- Velocidade cefálica
+- Velocidade palpebral
 - Distância do paciente
 - Integridade geométrica facial
-- Detecção e dinâmica fisiológica de piscadas
-- Estabilidade temporal do tracking
+- Estabilidade temporal
 - Penalização biomecânica angular
+- Dinâmica fisiológica de piscadas
+
+---
+
+## ✅ BCEA — Bivariate Contour Ellipse Area
+
+Medição estatística da estabilidade real da fixação ocular:
+
+- Área elíptica de dispersão do gaze
+- Correlação espacial X/Y
+- Excentricidade da fixação
+- Detecção de instabilidade foveal
+- Triagem de nistagmos sutis
+- Segmentação temporal por posição diagnóstica
+
+---
+
+## ✅ Máquina de Estados Clínica
+
+Orquestrador SaMD preparado para ambiente regulatório:
+
+Estados suportados:
+
+```text
+INITIALIZED
+CALIBRATING
+TRACKING
+CONSOLIDATING
+FINISHED
+ABORTED
+ERROR
+```
+
+Capacidades:
+
+- Controle estrito do exame
+- Temporal gating
+- Segmentação diagnóstica
+- Encerramento auditável
+- Timeout automático
+- Abort manual do operador
 
 ---
 
@@ -100,10 +171,12 @@ Infraestrutura otimizada para:
 
 - WebSocket binário híbrido
 - Processamento cooperativo
-- Alta taxa de transferência
-- Redução de overhead
-- Escalabilidade horizontal
+- Backpressure inteligente
 - Streaming temporal sincronizado
+- Desacoplamento de protocolo
+- Escalabilidade horizontal
+- Conversão em Isolates (Flutter)
+- Alta taxa de transferência
 
 ---
 
@@ -111,9 +184,9 @@ Infraestrutura otimizada para:
 
 ```text
  ┌──────────────────────────────────────────┐
- │         Flutter / React Web             │
- │  UI Clínica • Dashboard • Tracking UI   │
- └──────────────────┬───────────────────────┘
+ │       Flutter / React Web               │
+ │ UI Clínica • Dashboard • Tracking UI    │
+ └──────────────────┬──────────────────────┘
                     │
                     ▼
       ┌────────────────────────────────┐
@@ -137,7 +210,7 @@ Infraestrutura otimizada para:
                  ▼
 ┌──────────────────────────────────────────────┐
 │      Clinical Intelligence Layer             │
-│ Kalman • Ridge Regression • Surface Model    │
+│ BCEA • Kalman • Ridge • Spatial Models       │
 └────────────────┬─────────────────────────────┘
                  │
       ┌──────────┼───────────────┐
@@ -169,8 +242,8 @@ Cliente Camera Stream
               │
               ▼
 ┌────────────────────────────┐
-│ Temporal Synchronization   │
-│ Latency Reconstruction     │
+│ MedicalPacketDecoder       │
+│ Temporal Reconstruction    │
 └─────────────┬──────────────┘
               │
               ▼
@@ -183,6 +256,37 @@ Cliente Camera Stream
 │ JSON Clinical Telemetry    │
 │ Confidence • Angles • Sync │
 └────────────────────────────┘
+```
+
+---
+
+# 📂 Estrutura do Monorepo
+
+```text
+ortoptica_saas/
+├── apps/
+│   ├── flutter_paciente/
+│   └── flutter_profissional/
+│
+├── backend/
+│
+├── ml_service/
+│   ├── app/
+│   │   ├── analytics/
+│   │   ├── api/
+│   │   └── main.py
+│   │
+│   ├── protocols/
+│   ├── tracking/
+│   ├── services/
+│   └── telemetry.py
+│
+├── painel_admin/
+│
+├── vector_db/
+│
+├── docker-compose.yml
+└── README.md
 ```
 
 ---
@@ -202,28 +306,33 @@ Cliente Camera Stream
 - OpenCV
 - NumPy
 - Álgebra Linear
-- Geometria 3D
+- SolvePnP
 - Ridge Regression
 - Filtros de Kalman
+- Geometria 3D
 - Temporal Synchronization
 
 ## Frontend
-- React + Vite
 - Flutter
+- React
+- Vite
 - TailwindCSS
 
 ## Infraestrutura
 - Docker
+- Docker Compose
 - WebSocket
 - AsyncIO
 - Containers Linux
 
 ---
 
-# 📡 Pipeline de Tracking
+# 📡 Pipeline Clínico de Tracking
 
 ```text
 Captura de Frame
+        ↓
+Timestamp Binário
         ↓
 Sincronização Temporal
         ↓
@@ -243,81 +352,146 @@ Filtragem Temporal
         ↓
 Confidence Score
         ↓
-Avaliação Clínica
+BCEA
+        ↓
+Prism Diopters
+        ↓
+Consolidação Diagnóstica
 ```
 
 ---
 
-# 🩺 Possíveis Aplicações Clínicas
+# 🩺 Aplicações Clínicas
 
 - Estrabismo
 - Exotropia
 - Esotropia
 - Ambliopia
+- Nistagmo
 - Neurologia ocular
 - Reabilitação visual
-- Tracking neurocognitivo
-- Eye-tracking assistivo
+- Eye tracking assistivo
+- Neurociência cognitiva
 - Telemedicina oftalmológica
 - Estudos biométricos
+- Monitoramento longitudinal
 
 ---
 
-# 📊 Métricas da Engine
+# 📊 Recursos Computacionais
 
-## Recursos Computacionais
+## Performance
 - WebSocket binário otimizado
+- Backpressure inteligente
 - Cache de inversão matricial
-- SolvePnP EPNP acelerado
+- SolvePnP acelerado
 - Downscale adaptativo
 - Processamento assíncrono
+- Conversão paralela em Isolates
+- Pipeline cooperativo
 
-## Recursos Matemáticos
+## Matemática
 - Ridge Regression
 - Regularização de Tikhonov
 - Vetores normalizados
 - Geometria espacial
+- BCEA
+- Pearson Correlation
 - Tracking temporal
 
-## Recursos Clínicos
+## Clínica
 - Confidence Score
 - Telemetria sincronizada
-- Dinâmica fisiológica de piscada
-- Estimativa biométrica craniana
 - Penalização cinética cefálica
+- Dinâmica fisiológica de piscada
+- Temporal gating
+- Replay clínico
 
 ---
 
 # 🔬 Roadmap Futuro
 
-- Inferência com Deep Learning
-- Modelos Transformer Vision
+- Deep Learning Pipeline
+- Vision Transformers
 - Heatmaps oculares
 - Dashboard clínico avançado
+- Replay visual de sessões
 - Exportação DICOM
+- Integração HL7/FHIR
 - Multi-paciente
-- Streaming distribuído
 - Clusterização GPU
 - Inferência Edge AI
-- Integração hospitalar HL7/FHIR
+- Integração hospitalar
 
 ---
 
 # 🐳 Infraestrutura Docker
 
+## Inicialização do Ecossistema
+
 ```bash
-docker compose up -d
+docker compose up --build
 ```
 
-Serviços previstos:
+---
 
-- API Gateway Laravel
-- FastAPI AI Engine
+## Serviços Ativos
+
+- FastAPI Neuro-Orthoptic Engine
+- Laravel Gateway
+- React Admin Dashboard
 - Redis
 - MySQL
 - Qdrant
-- Nginx
 - Workers Assíncronos
+
+---
+
+# 🧪 Teste E2E do Orquestrador Clínico
+
+## 1. Health Check
+
+```bash
+curl http://localhost:8000/health
+```
+
+---
+
+## 2. Inicializar Sessão
+
+```bash
+curl -X POST http://localhost:8000/clinical/session/start \
+-H "Content-Type: application/json" \
+-d '{
+  "patient_id": 1,
+  "orthoptist_id": 10
+}'
+```
+
+---
+
+## 3. Transicionar Posição Ortóptica
+
+```bash
+curl -X POST http://localhost:8000/clinical/session/target/transition \
+-H "Content-Type: application/json" \
+-d '{
+  "session_id": "SEU_UUID",
+  "position_name": "PPO"
+}'
+```
+
+---
+
+## 4. Consolidar Sessão
+
+```bash
+curl -X POST http://localhost:8000/clinical/session/consolidate \
+-H "Content-Type: application/json" \
+-d '{
+  "session_id": "SEU_UUID"
+}'
+```
 
 ---
 
@@ -325,48 +499,23 @@ Serviços previstos:
 
 ## José Henrique Jardim
 
-Desenvolvedor Full Stack • Data Science • Computer Vision • AI Engineering
-
-### Contatos
-
-🔗 LinkedIn  
-https://linkedin.com/in/jose-jardim-764143247
-
-📺 YouTube  
-https://youtube.com/@caminho_do_codigo
-
-
+Desenvolvedor Full Stack • Computer Vision • Data Science • AI Engineering
 
 ---
-# 📺 Regra de Negócio
 
-<div align="center">
+# 🌐 Contatos
 
-<a href="https://youtu.be/Oo37ZGVPvNA" target="_blank">
-  <img 
-    src="https://i.ytimg.com/vi/4j0y1g531aM/maxresdefault.jpg"
-   alt="Assista no YouTube"
-    width="100%"
-    style="max-width: 900px; border-radius: 14px; box-shadow: 0px 6px 20px rgba(0,0,0,0.35);"
-  >
-</a>
+## LinkedIn
 
-</div>
+```text
+https://linkedin.com/in/jose-jardim-764143247
+```
 
-# 📺 Processo de Desenvolvimento
+## YouTube
 
-<div align="center">
-
-<a href="https://youtu.be/4j0y1g531aM" target="_blank">
-  <img 
-    src="https://i.ytimg.com/vi/4j0y1g531aM/maxresdefault.jpg"
-    alt="Assista no YouTube"
-    width="100%"
-    style="max-width: 900px; border-radius: 14px; box-shadow: 0px 6px 20px rgba(0,0,0,0.35);"
-  >
-</a>
-
-</div>
+```text
+https://youtube.com/@caminho_do_codigo
+```
 
 ---
 
