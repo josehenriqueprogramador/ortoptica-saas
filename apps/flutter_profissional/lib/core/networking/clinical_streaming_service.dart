@@ -1,81 +1,78 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_list';
+import 'dart:typed_data';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../models/telemetry_response.dart';
 
 class ClinicalStreamingService {
   WebSocketChannel? _channel;
-  StreamController<TelemetryResponse>? _telemetryController;
-  bool _isStreaming = false;
+  final StreamController<TelemetryResponse> _telemetryController = StreamController<TelemetryResponse>.broadcast();
 
-  Stream<TelemetryResponse> get telemetryStream => 
-      _telemetryController?.stream ?? const Stream.empty();
+  Stream<TelemetryResponse> get telemetryStream => _telemetryController.stream;
+  bool _isConnected = false;
 
-  bool get isStreaming => _isStreaming;
+  bool get isConnected => _isConnected;
 
-  /// Inicializa o canal de comunicação biomédica com a engine v11.1.0
-  Future<void> connect(String baseUrl, int sessionId) async {
-    final wsUrl = Uri.parse('$baseUrl/tracking/stream/$sessionId');
-    
-    _telemetryController = StreamController<TelemetryResponse>.broadcast();
-    _channel = WebSocketChannel.connect(wsUrl);
+  /// Inicializa a conexão persistente com o cluster de inferência geométrica
+  Future<void> connect(String wsUrl, String sessionId) async {
+    if (_isConnected) return;
 
-    // Escuta o loop de feedback de baixa latência vindo da IA
-    _channel!.stream.listen(
-      (message) {
-        try {
-          if (message is String) {
-            final Map<String, dynamic> jsonMap = jsonDecode(message);
-            final telemetry = TelemetryResponse.fromJson(jsonMap);
-            _telemetryController?.add(telemetry);
+    final uri = Uri.parse('$wsUrl/tracking/stream/$sessionId');
+    try {
+      _channel = WebSocketChannel.connect(uri);
+      _isConnected = true;
+
+      _channel!.stream.listen(
+        (message) {
+          try {
+            if (message is String) {
+              final Map<String, dynamic> jsonMap = jsonDecode(message);
+              final telemetry = TelemetryResponse.fromJson(jsonMap);
+              _telemetryController.add(telemetry);
+            }
+          } catch (e) {
+            // Silencia ou loga falhas pontuais de parse sem derrubar a stream principal
+            print('🚨 Erro de parse na telemetria reversa: $e');
           }
-        } catch (e) {
-          _telemetryController?.addError('Erro ao decodificar telemetria: $e');
-        }
-      },
-      onError: (error) {
-        _telemetryController?.addError('Falha na conexão do stream: $error');
-        _isStreaming = false;
-      },
-      onDone: () {
-        _telemetryController?.close();
-        _isStreaming = false;
-      },
-    );
-
-    _isStreaming = true;
+        },
+        onError: (error) => _handleDisconnect(),
+        onDone: () => _handleDisconnect(),
+      );
+    } catch (e) {
+      _handleDisconnect();
+      rethrow;
+    }
   }
 
-  /// Empacota e despacha o frame de imagem injetando o Hardware Timestamp nativo
-  void sendBiometricFrame(Uint8List jpegBytes) {
-    if (_channel == null || !_isStreaming) return;
+  /// Injeta frames na esteira de ML respeitando o protocolo binário proprietário:
+  /// [8 Bytes: Little-Endian Float64 (Timestamp)] + [Restante: Imagem JPEG]
+  void sendFrame(Uint8List jpegBytes) {
+    if (!_isConnected || _channel == null) return;
 
-    // 1. Geração do timestamp de aquisição em segundos fracionados (precisão double)
-    final double timestamp = DateTime.now().microsecondsSinceEpoch / 1000000.0;
-
-    // 2. Alocação do Header de 8 bytes e escrita em Little Endian
-    final ByteData header = ByteData(8);
-    header.setFloat64(0, timestamp, Endian.little);
-
-    // 3. Alocação do buffer unificado para evitar múltiplas cópias na RAM
-    final Uint8List payload = Uint8List(header.lengthInBytes + jpegBytes.length);
-
-    // Copia o cabeçalho temporal para o início do payload
-    payload.setRange(0, header.lengthInBytes, header.buffer.asUint8List());
+    final double timestamp = DateTime.now().millisecondsSinceEpoch / 1000.0;
     
-    // Copia os bytes puros do frame comprimido logo em seguida
-    payload.setRange(header.lengthInBytes, payload.length, jpegBytes);
+    // Aloca buffer exatamente com o tamanho do payload + 8 bytes de header
+    final totalLength = 8 + jpegBytes.length;
+    final Uint8List packet = Uint8List(totalLength);
+    final ByteData byteData = ByteData.sublistView(packet);
 
-    // 4. Despacha o pacote binário via transporte de rede de alta frequência
-    _channel!.sink.add(payload);
+    // Grava o timestamp no formato little-endian (coincidindo com o "<d" do Python struct)
+    byteData.setFloat64(0, timestamp, Endian.little);
+
+    // Copia o corpo da imagem JPEG logo após o cabeçalho de 8 bytes
+    packet.setRange(8, totalLength, jpegBytes);
+
+    // Dispara via canal binário puro do WebSocket
+    _channel!.sink.add(packet);
   }
 
-  /// Encerra a sessão garantindo a execução do Flush preventivo no backend
-  Future<void> disconnect() async {
-    _isStreaming = false;
-    await _channel?.sink.close();
-    await _telemetryController?.close();
+  void _handleDisconnect() {
+    _isConnected = false;
     _channel = null;
-    _telemetryController = null;
+  }
+
+  Future<void> disconnect() async {
+    await _channel?.sink.close();
+    _handleDisconnect();
   }
 }

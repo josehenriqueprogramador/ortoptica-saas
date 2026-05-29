@@ -1,26 +1,38 @@
 class TelemetryResponse {
-  final bool faceDetected;
-  final double trackingConfidence;
-  final double latencyInternalMs;
-  final String engineVersion;
-  final String mathModel;
+  final double gazeX;
+  final double gazeY;
+  final double confidenceScore;
+  final String currentTarget;
+  final double latencySec;
+  final Map<String, double> headAngles;
+  final String status;
 
   TelemetryResponse({
-    required this.faceDetected,
-    required this.trackingConfidence,
-    required this.latencyInternalMs,
-    required this.engineVersion,
-    required this.mathModel,
+    required this.gazeX,
+    required this.gazeY,
+    required this.confidenceScore,
+    required this.currentTarget,
+    required this.latencySec,
+    required this.headAngles,
+    required this.status,
   });
 
   factory TelemetryResponse.fromJson(Map<String, dynamic> json) {
-    final auditing = json['engine_auditing'] as Map<String, dynamic>? ?? {};
+    final anglesRaw = json['head_angles'] as Map<String, dynamic>? ?? {};
+    final Map<String, double> convertedAngles = {
+      'pitch': (anglesRaw['pitch'] ?? 0.0).toDouble(),
+      'yaw': (anglesRaw['yaw'] ?? 0.0).toDouble(),
+      'roll': (anglesRaw['roll'] ?? 0.0).toDouble(),
+    };
+
     return TelemetryResponse(
-      faceDetected: json['face_detected'] ?? false,
-      trackingConfidence: (json['tracking_confidence'] as num?)?.toDouble() ?? 0.0,
-      latencyInternalMs: (json['latency_internal_ms'] as num?)?.toDouble() ?? 0.0,
-      engineVersion: auditing['version'] ?? 'unknown',
-      mathModel: auditing['math_model'] ?? 'unknown',
+      gazeX: (json['gaze_x'] ?? 0.0).toDouble(),
+      gazeY: (json['gaze_y'] ?? 0.0).toDouble(),
+      confidenceScore: (json['confidence_score'] ?? 0.0).toDouble(),
+      currentTarget: json['current_target'] ?? 'UNKNOWN',
+      latencySec: (json['latency_sec'] ?? 0.0).toDouble(),
+      status: json['status'] ?? 'ERROR',
+      headAngles: convertedAngles,
     );
   }
 }

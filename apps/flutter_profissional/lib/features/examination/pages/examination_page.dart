@@ -1,189 +1,139 @@
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';
 import '../controllers/examination_controller.dart';
-import '../widgets/calibration_target.dart';
 import '../widgets/telemetry_panel.dart';
+import '../widgets/calibration_target.dart';
 
 class ExaminationPage extends StatefulWidget {
-  final int sessionId;
-  final String backendUrl;
-
-  const ExaminationPage({
-    Key? key,
-    required this.sessionId,
-    required this.backendUrl,
-  }) : super(key: key);
+  final String sessionId;
+  
+  const ExaminationPage({Key? key, required this.sessionId}) : super(key: key);
 
   @override
   State<ExaminationPage> createState() => _ExaminationPageState();
 }
 
 class _ExaminationPageState extends State<ExaminationPage> {
-  final ExaminationController _controller = ExaminationController();
-  CameraController? _cameraController;
-  bool _isCameraInitialized = false;
-  
-  final List<Alignment> _ninePositions = [
-    Alignment.center,       // Posição Primária do Olhar (PPO)
-    Alignment.topCenter,    // Supraversão
-    Alignment.bottomCenter, // Infraversão
-    Alignment.centerLeft,   // Levoversão
-    Alignment.centerRight,  // Dextroversão
-    Alignment.topLeft,      // Supralevoversão
-    Alignment.topRight,     // Supradextroversão
-    Alignment.bottomLeft,   // Infralevoversão
-    Alignment.bottomRight,  // Infradextroversão
-  ];
-  
-  int _currentPositionIndex = 0;
+  late final ExaminationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _initializeClinicalPipeline();
-  }
-
-  /// Inicializa de forma síncrona a conexão de rede e o hardware da câmera
-  Future<void> _initializeClinicalPipeline() async {
-    // 1. Conecta o WebSocket com a Engine Python v11.1.0
-    await _controller.startExamination(widget.backendUrl, widget.sessionId);
-    _controller.addListener(_onControllerUpdated);
-
-    try {
-      // 2. Busca as câmeras disponíveis no dispositivo (Prefere a frontal para rastreamento)
-      final cameras = await availableCameras();
-      final frontCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
-
-      // 3. Configura o controller com resolução ideal (VGA ou 720p é o teto para sub-80KB/frame)
-      _cameraController = CameraController(
-        frontCamera,
-        ResolutionPreset.medium,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420, // Formato bruto de alta frequência
-      );
-
-      await _cameraController!.initialize();
-      
-      if (!mounted) return;
-      setState(() {
-        _isCameraInitialized = true;
-      });
-
-      // 4. Dispara o Stream nativo de hardware acoplado diretamente ao nosso driver de Isolate
-      await _cameraController!.startImageStream((CameraImage availableImage) {
-        _controller.handleCameraStreamFrame(availableImage);
-      });
-
-    } catch (e) {
-      debugPrint("⚠️ Falha crítica ao inicializar hardware de captura: $e");
-    }
-  }
-
-  void _onControllerUpdated() {
-    if (mounted) setState(() {});
-  }
-
-  void _nextPosition() {
-    if (_currentPositionIndex < _ninePositions.length - 1) {
-      setState(() {
-        _currentPositionIndex++;
-      });
-    } else {
-      _finishExam();
-    }
-  }
-
-  void _finishExam() async {
-    // Interrompe o fluxo de frames e fecha o canal WebSocket
-    if (_cameraController != null && _cameraController!.value.isStreamingImages) {
-      await _cameraController!.stopImageStream();
-    }
-    await _controller.stopExamination();
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Color(0xFF00F2FE),
-          content: Text(
-            'Mapeamento concluído! Sessão consolidada na Engine.',
-            style: TextStyle(color: Color(0xFF0B132B), fontWeight: FontWeight.bold),
-          ),
-        ),
-      );
-      Navigator.pop(context);
-    }
+    _controller = ExaminationController();
+    _controller.initializeSession(widget.sessionId);
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
-    _controller.removeListener(_onControllerUpdated);
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool isStreamingActive = _isCameraInitialized && _controller.state == ExaminationState.streaming;
-
     return Scaffold(
-      backgroundColor: const Color(0xFF0B132B), // Azul Titânio
-      body: Row(
-        children: [
-          // Área Clínica Principal (Onde o paciente foca o olhar)
-          Expanded(
-            child: Stack(
-              children: [
-                // Renderização sutil do Preview da Câmera no fundo (para o técnico verificar o enquadramento)
-                if (_isCameraInitialized)
-                  Opacity(
-                    opacity: 0.15, // Opacidade baixa para não distrair o paciente do alvo visual
-                    child: Center(child: CameraPreview(_cameraController!)),
-                  ),
+      backgroundColor: const Color(0xFF121214),
+      body: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          // Fallback visual de carregamento ou erro crítico de rede
+          if (_controller.state == ExamState.connecting) {
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.cyanAccent),
+            );
+          }
 
-                // Alvo dinâmico pulsante nas 9 posições da marca PRECISION VISION
-                CalibrationTarget(
-                  alignment: _ninePositions[_currentPositionIndex],
-                  isActive: isStreamingActive,
+          final telemetry = _controller.currentTelemetry;
+          final double patientX = telemetry?.gazeX ?? 0.0;
+          final double patientY = telemetry?.gazeY ?? 0.0;
+          final double confidence = telemetry?.confidenceScore ?? 0.0;
+
+          return Stack(
+            children: [
+              // 🎯 Renderização Cartesiana dos Vetores e Alvo Ortóptico
+              Positioned.fill(
+                child: CalibrationTarget(
+                  targetX: _controller.targetX,
+                  targetY: _controller.targetY,
+                  patientX: patientX,
+                  patientY: patientY,
+                  confidence: confidence,
                 ),
-                
-                // Botão de controle de avanço do Ortoptista
+              ),
+
+              // 📊 Painel de Controle de Telemetria Flutuante
+              if (telemetry != null)
                 Positioned(
-                  bottom: 24,
-                  right: 24,
-                  child: FloatingActionButton.extended(
-                    backgroundColor: const Color(0xFF00F2FE),
-                    foregroundColor: const Color(0xFF0B132B),
-                    icon: const Icon(Icons.arrow_forward),
-                    label: Text(_currentPositionIndex == _ninePositions.length - 1 ? 'Finalizar Exame' : 'Próxima Posição'),
-                    onPressed: isStreamingActive ? _nextPosition : null,
+                  top: 40,
+                  right: 20,
+                  width: 240,
+                  child: TelemetryPanel(telemetry: telemetry),
+                ),
+
+              // 📢 Banner Dinâmico de Status Clínico (Rodapé Superior)
+              Positioned(
+                top: 40,
+                left: 20,
+                right: 260,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    _controller.statusMessage,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ),
-                
-                if (!isStreamingActive)
-                  const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(color: Color(0xFF00F2FE)),
-                        SizedBox(height: 16),
-                        Text(
-                          'Sincronizando Hardware e Engine Biomédica...',
-                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
-                        )
-                      ],
+              ),
+
+              // 🕹️ Painel de Orquestração do Médico (Barra Inferior)
+              Positioned(
+                bottom: 30,
+                left: 20,
+                right: 20,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        _controller.abortSession();
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.close),
+                      label: const Text('Abortar'),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          
-          // Painel Lateral Direto de Telemetria Biomédica
-          TelemetryPanel(telemetry: _controller.latestTelemetry),
-        ],
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        // Varre os eixos diagnósticos mudando a posição do estímulo
+                        if (_controller.targetX == 0.0) {
+                          _controller.transitionTarget(0.6, 0.6, 'UP_RIGHT_STRABISMUS_CHECK');
+                        } else {
+                          _controller.transitionTarget(0.0, 0.0, 'CENTER_FIXATION');
+                        }
+                      },
+                      icon: const Icon(Icons.track_changes),
+                      label: Text(_controller.targetX == 0.0 ? 'Avançar Posição' : 'Resetar Centro'),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        await _controller.consolidateSession();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Sessão selada no banco de dados!')),
+                        );
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.check_circle),
+                      label: const Text('Finalizar e Salvar'),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                    ),
+                  ],
+                ),
+              )
+            ],
+          );
+        },
       ),
     );
   }

@@ -2,87 +2,92 @@ import 'package:flutter/material.dart';
 import '../../../core/models/telemetry_response.dart';
 
 class TelemetryPanel extends StatelessWidget {
-  final TelemetryResponse? telemetry;
+  final TelemetryResponse telemetry;
 
-  const TelemetryPanel({Key? key, this.telemetry}) : super(key: key);
+  const TelemetryPanel({Key? key, required this.telemetry}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final hasData = telemetry != null;
-    final faceDetected = telemetry?.faceDetected ?? false;
-    final confidence = (telemetry?.trackingConfidence ?? 0.0) * 100;
-
+    final bool isPostureValid = !telemetry.status.contains('INVALID');
+    
     return Container(
-      width: 280,
-      color: const Color(0xFF0F172A).withOpacity(0.9), // Fundo Navy escuro da logo
       padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.85),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isPostureValid ? Colors.greenAccent : Colors.redAccent,
+          width: 1.5,
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'TELEMETRIA SaMD',
+                style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              ),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: isPostureValid ? Colors.green : Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              )
+            ],
+          ),
+          const Divider(color: Colors.white24, height: 16),
+          _buildMetricRow('Gaze X / Y:', '[${telemetry.gazeX.toStringAsFixed(3)}, ${telemetry.gazeY.toStringAsFixed(3)}]'),
+          _buildMetricRow('Confiança:', '${(telemetry.confidenceScore * 100).toStringAsFixed(0)}%'),
+          _buildMetricRow('Latência:', '${(telemetry.latencySec * 1000).toStringAsFixed(1)} ms'),
+          const SizedBox(height: 8),
           const Text(
-            'TELEMETRIA BIOMÉDICA',
-            style: TextStyle(
-              color: Colors.white, 
-              fontWeight: FontWeight.bold, 
-              fontSize: 14,
-              letterSpacing: 1.2
-            ),
-          ),
-          const Divider(color: Color(0xFF94A3B8), height: 24),
-          
-          // Indicador de Detecção Facial
-          _buildStatusRow(
-            'Rastreamento Facial:',
-            faceDetected ? 'ATIVO' : 'PROCURANDO...',
-            faceDetected ? const Color(0xFF00F2FE) : Colors.redAccent,
-          ),
-          const SizedBox(height: 16),
-
-          // Barra de Confiança do Olhar
-          const Text('Confiabilidade do Gaze:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-          const SizedBox(height: 6),
-          LinearProgressIndicator(
-            value: (telemetry?.trackingConfidence ?? 0.0),
-            backgroundColor: Colors.white10,
-            color: confidence > 75 ? const Color(0xFF00F2FE) : Colors.amber,
-            minHeight: 6,
+            'POSTURA DO CRÂNIO (6 DoF)',
+            style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          Text(
-            '${confidence.toStringAsFixed(1)}%',
-            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-
-          // Latência Interna da Pipeline
-          _buildStatusRow(
-            'Latência do Motor:',
-            hasData ? '${telemetry!.latencyInternalMs.toStringAsFixed(1)} ms' : '--',
-            const Color(0xFF00F2FE),
-          ),
-          
-          const Spacer(),
-          const Divider(color: Color(0xFF94A3B8)),
-          Text(
-            'Engine: ${telemetry?.engineVersion ?? "11.1.0"}',
-            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10),
-          ),
-          Text(
-            'Model: ${telemetry?.mathModel ?? "ridge_v2_spatial"}',
-            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10),
-          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildAngleBadge('PITCH', telemetry.headAngles['pitch'] ?? 0.0),
+              _buildAngleBadge('YAW', telemetry.headAngles['yaw'] ?? 0.0),
+              _buildAngleBadge('ROLL', telemetry.headAngles['roll'] ?? 0.0),
+            ],
+          )
         ],
       ),
     );
   }
 
-  Widget _buildStatusRow(String label, String value, Color valueColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
-        Text(value, style: TextStyle(color: valueColor, fontSize: 12, fontWeight: FontWeight.bold)),
-      ],
+  Widget _buildMetricRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white94, fontSize: 13)),
+          Text(value, style: const TextStyle(color: Colors.cyanAccent, fontSize: 13, fontFamily: 'Courier')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAngleBadge(String label, double value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '$label: ${value > 0 ? "+" : ""}${value.toStringAsFixed(1)}°',
+        style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'Courier'),
+      ),
     );
   }
 }

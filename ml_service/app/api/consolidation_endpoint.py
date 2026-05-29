@@ -1,230 +1,145 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
-from enum import Enum
-import numpy as np
-import time
-import uuid
+import datetime
 
-from app.analytics.biometric_calculator import BiometricAnalytics
+from database import get_db
+from app.session.session_models import ClinicalSession
+from app.session.session_manager import session_manager
+from app.analytics.biometric_calculator import BiometricCalculator
 
-router = APIRouter(prefix="/clinical", tags=["Clinical Session Orchestrator"])
+router = APIRouter(prefix="/api/clinical", tags=["Orquestração Clínica"])
 
-# ---------------------------------------------------------------------------
-# ENUMS E SCHEMAS ESTRITOS (Garantia de Tipagem e Protocolo)
-# ---------------------------------------------------------------------------
-class ClinicalState(str, Enum):
-    INITIALIZED = "INITIALIZED"
-    CALIBRATING = "CALIBRATING"
-    CALIBRATION_FAILED = "CALIBRATION_FAILED"
-    TRACKING = "TRACKING"
-    CONSOLIDATING = "CONSOLIDATING"
-    FINISHED = "FINISHED"
-    ABORTED = "ABORTED"
-    ERROR = "ERROR"
+# --- Schemas de Validação (Pydantic) ---
+class SessionCreateRequest(BaseModel):
+    session_id: str = Field(..., example="8f9g7h6j-1234-abcd-efgh-1234567890ab")
 
-class OrthopticTarget(str, Enum):
-    PPO = "PPO"                              # Posição Primária do Olhar (Centro)
-    SUPRAVERSION = "SUPRAVERSION"            # Cima
-    INFRAVERSION = "INFRAVERSION"            # Baixo
-    DEXTROVERSION = "DEXTROVERSION"          # Direita
-    LEVOVERSION = "LEVOVERSION"              # Esquerda
-    SUPRADEXTROVERSION = "SUPRADEXTROVERSION" # Cima-Direita
-    SUPRALEVOVERSION = "SUPRALEVOVERSION"     # Cima-Esquerda
-    INFRADEXTROVERSION = "INFRADEXTROVERSION" # Baixo-Direita
-    INFRALEVOVERSION = "INFRALEVOVERSION"     # Baixo-Esquerda
-
-class StartSessionRequest(BaseModel):
-    patient_id: int = Field(..., example=1)
-    orthoptist_id: int = Field(..., example=10)
-
-class TargetTransitionRequest(BaseModel):
+class SessionResponse(BaseModel):
     session_id: str
-    position_name: OrthopticTarget # Validação automática via Enum das 9 posições
+    status: str
+    created_at: datetime.datetime
+    bcea_score: float | None
 
-class ActionSessionRequest(BaseModel):
-    session_id: str
+    class Config:
+        from_attributes = True
 
-# DATASTORE VOLÁTIL (Pronto para Redis)
-ACTIVE_SESSIONS: Dict[str, Dict[str, Any]] = {}
+class TransitionRequest(BaseModel):
+    target_label: str = Field(..., example="UP_RIGHT_STRABISMUS_CHECK")
 
-# ---------------------------------------------------------------------------
-# ENDPOINTS DE CONTROLE DE FLUXO E OBSERVABILIDADE
-# ---------------------------------------------------------------------------
 
-@router.get("/session/{session_id}/status")
-async def get_session_status(session_id: str):
+# --- Rotas do Ciclo de Vida HTTP ---
+
+@router.post("/start", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
+async def start_session(payload: SessionCreateRequest, db: AsyncSession = Depends(get_db)):
     """
-    Endpoint de Observabilidade. Permite ao painel React ou Gateway SaaS
-    consultar em tempo real o estado clínico e métricas de infraestrutura da sessão.
+    Inicializa formalmente o estado do exame médico no banco de dados e
+    aloca uma instância em memória RAM para o streaming de alta frequência.
     """
-    if session_id not in ACTIVE_SESSIONS:
-        raise HTTPException(status_code=404, detail="Sessão clínica inativa ou não localizada.")
-    
-    session = ACTIVE_SESSIONS[session_id]
-    
-    # Lógica simples de timeout passivo (Exemplo: 10 minutos de inatividade)
-    if time.time() - session["last_activity_at"] > 600:
-        session["current_state"] = ClinicalState.ABORTED
-        return {"session_id": session_id, "current_state": ClinicalState.ABORTED, "reason": "TIMEOUT_INACTIVITY"}
+    query = select(ClinicalSession).where(ClinicalSession.id == payload.session_id)
+    result = await db.execute(query)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Identificador de sessão já ativo ou utilizado.")
 
-    return {
-        "session_id": session_id,
-        "current_state": session["current_state"],
-        "active_target": session["current_target"],
-        "frames_ingested": session["frames_count"],
-        "elapsed_seconds": round(time.time() - session["created_at"], 1)
-    }
+    # 1. Cria o registro persistente de auditoria clínica
+    new_session = ClinicalSession(id=payload.session_id, status="ACTIVE")
+    db.add(new_session)
+    
+    # 2. Inicializa o buffer volátil em memória RAM para o WebSocket
+    session_manager.start_session(payload.session_id)
 
-@router.post("/session/start")
-async def start_clinical_session(payload: StartSessionRequest):
-    """
-    Inicializa a sessão SaMD. Instancia o estado de CALIBRATING.
-    """
-    session_id = str(uuid.uuid4())
-    now = time.time()
-    
-    ACTIVE_SESSIONS[session_id] = {
-        "patient_id": payload.patient_id,
-        "orthoptist_id": payload.orthoptist_id,
-        "current_state": ClinicalState.CALIBRATING,
-        "current_target": "CALIBRATION_GRID",
-        "timeline_markers": {},
-        "frames_count": 0,
-        "created_at": now,
-        "last_activity_at": now
-    }
-    
-    return {
-        "session_id": session_id,
-        "status": "INITIALIZED",
-        "current_state": ClinicalState.CALIBRATING
-    }
+    await db.commit()
+    await db.refresh(new_session)
+    return SessionResponse(
+        session_id=new_session.id,
+        status=new_session.status,
+        created_at=new_session.created_at,
+        bcea_score=new_session.bcea_score
+    )
 
-@router.post("/session/target/transition")
-async def transition_target_position(payload: TargetTransitionRequest):
+@router.post("/{session_id}/transition", status_code=status.HTTP_200_OK)
+async def transition_target(session_id: str, payload: TransitionRequest, db: AsyncSession = Depends(get_db)):
     """
-    Orquestrador de Alvos. Move o estado para TRACKING e isola a janela de tempo.
-    Garante que o cliente consuma apenas alvos válidos das 9 posições regulamentares.
+    Sincroniza o movimento do estímulo visual feito pelo médico.
+    Atualiza o runtime em memória para segmentar corretamente os vetores de foveação.
     """
-    session_id = payload.session_id
-    pos_name = payload.position_name.value
-    
-    if session_id not in ACTIVE_SESSIONS:
-        raise HTTPException(status_code=404, detail="Sessão ativa não encontrada.")
-        
-    session = ACTIVE_SESSIONS[session_id]
-    
-    if session["current_state"] in [ClinicalState.FINISHED, ClinicalState.ABORTED]:
-        raise HTTPException(status_code=400, detail="Não é possível transicionar alvos em uma sessão encerrada.")
-        
-    current_time = time.time()
-    session["last_activity_at"] = current_time
-    
-    # Fecha o marcador temporal do alvo anterior se houver
-    if session["current_target"] is not None and session["current_target"] in session["timeline_markers"]:
-        session["timeline_markers"][session["current_target"]]["target_completed_at"] = current_time
-        
-    # Inicializa o gating do novo alvo ortóptico
-    session["current_target"] = pos_name
-    session["current_state"] = ClinicalState.TRACKING
-    session["timeline_markers"][pos_name] = {
-        "target_entered_at": current_time,
-        "target_completed_at": None
-    }
-    
-    return {
-        "session_id": session_id,
-        "current_state": ClinicalState.TRACKING,
-        "active_target": pos_name,
-        "timestamp_marker": current_time
-    }
+    query = select(ClinicalSession).where(ClinicalSession.id == session_id)
+    result = await db.execute(query)
+    session = result.scalar_one_or_none()
 
-@router.post("/session/abort")
-async def abort_session(payload: ActionSessionRequest):
-    """
-    Cancela o exame manualmente. Interrompe a ingestão do WebSocket imediatamente
-    e altera o estado para ABORTED para fins de auditoria de recusa/falha do paciente.
-    """
-    session_id = payload.session_id
-    if session_id not in ACTIVE_SESSIONS:
-        raise HTTPException(status_code=404, detail="Sessão ativa não encontrada.")
-        
-    ACTIVE_SESSIONS[session_id]["current_state"] = ClinicalState.ABORTED
-    ACTIVE_SESSIONS[session_id]["last_activity_at"] = time.time()
-    
-    return {"session_id": session_id, "status": "ABORTED", "message": "Exame interrompido pelo operador."}
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessão clínica não localizada.")
+    if session.status != "ACTIVE":
+        raise HTTPException(status_code=400, detail=f"Incapaz de transicionar. Sessão encontra-se {session.status}.")
 
-@router.post("/session/consolidate")
-async def consolidate_session(payload: ActionSessionRequest):
+    # Intercepta a sessão em memória e altera a marcação anatômica do alvo atual
+    runtime = session_manager.get_session(session_id)
+    if runtime:
+        runtime.update_target(payload.target_label)
+        print(f"🔄 [RAM Sync] Sessão {session_id} chaveada cirurgicamente para o alvo: {payload.target_label}")
+    else:
+        print(f"⚠️ Alerta: Requisição de transição recebida para sessão {session_id} sem runtime ativo em RAM.")
+
+    return {"status": "TARGET_TRANSITION_ACKNOWLEDGED", "current_target": payload.target_label}
+
+@router.post("/{session_id}/consolidate", response_model=SessionResponse, status_code=status.HTTP_200_OK)
+async def consolidate_session(session_id: str, db: AsyncSession = Depends(get_db)):
     """
-    Corta a série temporal, executa a engine estatística de BCEA/Prismas por músculo e encerra.
+    Descarrega o buffer de telemetria da memória RAM para o banco físico em bloco,
+    executa o motor analítico de BCEA e encerra o ciclo de vida do exame.
     """
-    session_id = payload.session_id
-    
-    if session_id not in ACTIVE_SESSIONS:
-        raise HTTPException(status_code=404, detail="Sessão ativa não encontrada.")
-        
-    session = ACTIVE_SESSIONS[session_id]
-    
-    if session["current_state"] == ClinicalState.CONSOLIDATING:
-        raise HTTPException(status_code=400, detail="Esta sessão já está em processo de consolidação.")
-        
-    session["current_state"] = ClinicalState.CONSOLIDATING
-    
-    # Fecha a janela do último alvo ativo
-    if session["current_target"] is not None and session["current_target"] in session["timeline_markers"]:
-        if session["timeline_markers"][session["current_target"]]["target_completed_at"] is None:
-            session["timeline_markers"][session["current_target"]]["target_completed_at"] = time.time()
+    query = select(ClinicalSession).where(ClinicalSession.id == session_id)
+    result = await db.execute(query)
+    session = result.scalar_one_or_none()
 
-    diagnostics_per_position = {}
-    global_instability_detected = False
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessão clínica não localizada.")
+    if session.status != "ACTIVE":
+        raise HTTPException(status_code=400, detail=f"Sessão não pode ser consolidada pois está {session.status}.")
+
+    runtime = session_manager.get_session(session_id)
+    if runtime:
+        # 1. Executa o bulk insert assíncrono de todos os pontos de olhar coletados
+        await runtime.flush_to_database(db)
+        # 2. Desaloca os buffers de memória RAM para prevenir vazamentos
+        session_manager.close_session(session_id)
+
+    # 3. Executa o cálculo estatístico sobre os pontos consolidados no banco
+    calculated_bcea = await BiometricCalculator.compute_session_bcea(session_id, db)
+
+    session.status = "CONSOLIDATED"
+    session.bcea_score = calculated_bcea
     
-    # Processa as janelas capturadas pelo Timeline Recorder
-    for pos, markers in session["timeline_markers"].items():
-        if pos == "CALIBRATION_GRID": continue
-        
-        t_start = markers["target_entered_at"]
-        t_end = markers["target_completed_at"] or time.time()
-        
-        # Simulação estatística com numpy fatiado por tempo
-        noise_factor = 1.1 if pos == OrthopticTarget.PPO.value else 4.9
-        np_random_x = np.random.normal(loc=0.0, scale=noise_factor, size=180).tolist()
-        np_random_y = np.random.normal(loc=0.0, scale=noise_factor, size=180).tolist()
-        
-        bcea_results = BiometricAnalytics.calculate_bcea(np_random_x, np_random_y)
-        
-        simulated_deviation_deg = 0.4 if pos == OrthopticTarget.PPO.value else 6.1
-        prism_diopters = BiometricAnalytics.convert_angle_to_prism_diopters(simulated_deviation_deg)
-        
-        diagnostics_per_position[pos] = {
-            "window_duration_sec": round(t_end - t_start, 3),
-            "bcea": bcea_results,
-            "strabismus_metrics": {
-                "angle_degrees": simulated_deviation_deg,
-                "prism_diopters_delta": prism_diopters,
-                "clinical_significance": "normal" if prism_diopters < 10.0 else "desvio_acentuado"
-            }
-        }
-        
-        if bcea_results.get("clinical_status") in ["mild_instability", "severe_instability"]:
-            global_instability_detected = True
+    await db.commit()
+    await db.refresh(session)
+    return SessionResponse(
+        session_id=session.id,
+        status=session.status,
+        created_at=session.created_at,
+        bcea_score=session.bcea_score
+    )
 
-    # Desaloca a sessão da memória ativa rodando o estado FINISHED
-    del ACTIVE_SESSIONS[session_id]
+@router.post("/{session_id}/abort", response_model=SessionResponse, status_code=status.HTTP_200_OK)
+async def abort_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Cancela o exame imediatamente, limpando os buffers em memória RAM e descartando dados parciais.
+    """
+    query = select(ClinicalSession).where(ClinicalSession.id == session_id)
+    result = await db.execute(query)
+    session = result.scalar_one_or_none()
 
-    return {
-        "session_id": session_id,
-        "status": "CONSOLIDATED",
-        "runtime_state": ClinicalState.FINISHED.value,
-        "auditing": {
-            "engine_version": "11.1.0",
-            "math_model": "ridge_v2_spatial_bcea",
-            "orchestrator_mode": "strict_temporal_gating"
-        },
-        "summary": {
-            "global_instability_detected": global_instability_detected,
-            "primary_position_deviation_delta": diagnostics_per_position.get("PPO", {}).get("strabismus_metrics", {}).get("prism_diopters_delta", 0.0)
-        },
-        "positions_detailed": diagnostics_per_position
-    }
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessão clínica não localizada.")
+
+    # Limpa a sessão da RAM imediatamente sem efetuar o flush
+    session_manager.close_session(session_id)
+
+    session.status = "ABORTED"
+    await db.commit()
+    await db.refresh(session)
+    return SessionResponse(
+        session_id=session.id,
+        status=session.status,
+        created_at=session.created_at,
+        bcea_score=session.bcea_score
+    )

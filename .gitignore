@@ -1,30 +1,42 @@
-# Docker
-*.log
-docker-data/
-.env
+# Dependências e Binários do Node/Vite (Front-end)
+node_modules/
+dist/
+.env.local
+.env.development.local
+.env.production.local
 
-# Laravel
-backend/vendor/
-backend/node_modules/
-backend/storage/
-backend/bootstrap/cache/
+# Arquivos de Runtime do Python e Caches (Backend)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
 
-# React
-painel_admin/node_modules/
-painel_admin/dist/
+# Banco de Dados Local (SQLite Assíncrono)
+*.db
+*.db-journal
+*.db-wal
 
-# Python
-ml_service/__pycache__/
-ml_service/.venv/
-
-# Flutter
-.build/
+# Arquivos de Build do Flutter / Dart (Mobile/Desktop)
 .dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
+.packages
 .pub-cache/
 .pub/
+build/
+*.directory
 
-# OS
+# Sistema e IDEs
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

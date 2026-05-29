@@ -1,79 +1,90 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-class CalibrationTarget extends StatefulWidget {
-  final Alignment alignment;
-  final bool isActive;
+class CalibrationTarget extends StatelessWidget {
+  final double targetX;
+  final double targetY;
+  final double patientX;
+  final double patientY;
+  final double confidence;
 
   const CalibrationTarget({
     Key? key,
-    required this.alignment,
-    required this.isActive,
+    required this.targetX,
+    required this.targetY,
+    required this.patientX,
+    required this.patientY,
+    required this.confidence,
   }) : super(key: key);
 
   @override
-  State<CalibrationTarget> createState() => _CalibrationTargetState();
-}
-
-class _CalibrationTargetState extends State<CalibrationTarget> with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (!widget.isActive) return const SizedBox.shrink();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double width = constraints.maxWidth;
+        final double height = constraints.maxHeight;
 
-    return Align(
-      alignment: widget.alignment,
-      child: AnimatedBuilder(
-        animation: _animationController,
-        builder: (context, child) {
-          final scale = 1.0 + (_animationController.value * 0.25);
-          return Transform.scale(
-            scale: scale,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(00000000), // Fundo transparente para o anel laser
-                border: Border.all(color: const Color(0xFF00F2FE), width: 3),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF00F2FE).withOpacity(0.5),
-                    blurRadius: 10 * _animationController.value,
-                    spreadRadius: 2,
-                  )
-                ],
-              ),
-              child: Center(
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
+        final double targetPixelX = ((targetX + 1.0) / 2.0) * width;
+        final double targetPixelY = ((targetY + 1.0) / 2.0) * height;
+
+        final double patientPixelX = ((patientX + 1.0) / 2.0) * width;
+        final double patientPixelY = ((patientY + 1.0) / 2.0) * height;
+
+        return Stack(
+          children: [
+            // 🎯 1. ALVO ORTÓPTICO DE FIXAÇÃO
+            Positioned(
+              left: targetPixelX - 20,
+              top: targetPixelY - 20,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.3),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                 ),
               ),
             ),
-          );
-        },
-      ),
+
+            // 👁️ 2. ESTRELA RETICULAR DO OLHAR
+            Positioned(
+              left: patientPixelX - 12,
+              top: patientPixelY - 12,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 50),
+                opacity: confidence > 0.2 ? 1.0 : 0.2,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.cyanAccent, width: 2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Colors.cyanAccent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
