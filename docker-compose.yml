@@ -8,12 +8,12 @@ services:
       dockerfile: Dockerfile
     container_name: ortoptica_ml_service
     ports:
-      - "8000:8000"
+      - "${API_PORT}:${API_PORT}"
     volumes:
       - ./ml_service:/app
     environment:
-      - ENV=development
-      - DATABASE_URL=sqlite+aiosqlite:///app/ortoptica.db
+      - ENV=${ENV}
+      - DATABASE_URL=${DATABASE_URL}
     restart: always
 
   # 2. Painel Web Administrativo (Interface do Médico)
@@ -23,12 +23,12 @@ services:
       dockerfile: Dockerfile
     container_name: ortoptica_painel_admin
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
     volumes:
       - ./painel_admin:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL}
     depends_on:
       - ml_service
     restart: always
