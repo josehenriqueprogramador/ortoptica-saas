@@ -1,0 +1,8 @@
+{
+  "telemetry": {
+    "gaze_x": 0.31,
+    "gaze_y": -0.08,
+    "confidence_score": 0.91,
+    "latency_sec": 0.015
+  }
+}

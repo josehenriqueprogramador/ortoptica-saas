@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../controllers/examination_controller.dart';
-import '../../../../core/models/examination_state.dart';
+import '../widgets/pre_exam_checklist.dart';
+import '../widgets/telemetry_panel.dart';
+import '../../../core/models/examination_state.dart';
 
 class ExaminationPage extends StatefulWidget {
   final ExaminationController controller;
@@ -16,33 +18,36 @@ class _ExaminationPageState extends State<ExaminationPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Exame Precision Vision")),
-      body: Center(
-        child: ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            final packet = widget.controller.packet;
-            final isReady = widget.controller.isReady;
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: ListenableBuilder(
+            listenable: widget.controller,
+            builder: (context, _) {
+              final packet = widget.controller.packet;
+              final isReady = widget.controller.isReady;
 
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "Status: ${packet?.preExam?.status ?? 'CONECTANDO...'}",
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: isReady
-                      ? () => _iniciarExame(context)
-                      : null,
-                  child: const Text("Iniciar Exame"),
-                ),
-                const SizedBox(height: 20),
-                if (packet?.preExam != null)
-                  Text("Qualidade: ${packet!.preExam!.qualityScore}%"),
-              ],
-            );
-          },
+              return Column(
+                children: [
+                  Text(
+                    "Status: ${packet?.preExam?.status ?? 'CONECTANDO...'}",
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 20),
+                  if (packet?.preExam != null)
+                    PreExamChecklist(status: packet!.preExam!),
+                  const SizedBox(height: 20),
+                  if (packet != null)
+                    TelemetryPanel(telemetry: packet.telemetry),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: isReady ? () => _iniciarExame(context) : null,
+                    child: const Text("Iniciar Exame"),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

@@ -1,0 +1,18 @@
+{
+  "telemetry": {
+    "gaze_x": 0.0,
+    "gaze_y": 0.0,
+    "confidence_score": 0.0,
+    "latency_sec": 0.0
+  },
+  "pre_exam": {
+    "status": "ERROR",
+    "quality_score": 0.0,
+    "checks": {
+      "face_detected": false,
+      "pose_ok": false,
+      "lighting_ok": false,
+      "confidence_ok": false
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "telemetry": {
+    "gaze_x": 0.18,
+    "gaze_y": -0.05,
+    "confidence_score": 0.62,
+    "latency_sec": 0.021
+  },
+  "pre_exam": {
+    "status": "WAITING_FOR_ENVIRONMENT",
+    "quality_score": 63.5,
+    "checks": {
+      "face_detected": true,
+      "pose_ok": true,
+      "lighting_ok": false,
+      "confidence_ok": true
+    }
+  }
+}

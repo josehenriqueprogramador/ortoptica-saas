@@ -4,7 +4,7 @@ class TelemetryResponse {
   final double confidenceScore;
   final double latencySec;
 
-  TelemetryResponse({
+  const TelemetryResponse({
     required this.gazeX,
     required this.gazeY,
     required this.confidenceScore,

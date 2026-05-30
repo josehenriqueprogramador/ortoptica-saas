@@ -14,20 +14,27 @@ class PreExamChecklist extends StatelessWidget {
         _buildCheckItem("Postura Adequada", status.poseOk),
         _buildCheckItem("Iluminação OK", status.lightingOk),
         _buildCheckItem("Confiança da IA", status.confidenceOk),
-        const SizedBox(height: 10),
-        Text("Qualidade Geral: ${status.qualityScore}%"),
+        const SizedBox(height: 15),
+        Text(
+          "Qualidade Geral: ${status.qualityScore.toStringAsFixed(1)}%",
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
       ],
     );
   }
 
   Widget _buildCheckItem(String label, bool isOk) {
-    return Row(
-      children: [
-        Icon(isOk ? Icons.check_circle : Icons.error, 
-             color: isOk ? Colors.green : Colors.red),
-        const SizedBox(width: 8),
-        Text(label),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(isOk ? Icons.check_circle : Icons.error, 
+               color: isOk ? Colors.green : Colors.red),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
     );
   }
 }
