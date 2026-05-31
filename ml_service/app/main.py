@@ -9,7 +9,7 @@ from database import engine, Base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SaMDEngine")
 
-# --- Validador de Qualidade (Sprint 1.1) ---
+# --- Validador de Qualidade ---
 class PreExamValidator:
     def validate(self, landmarks, pose, frame):
         gray = np.mean(frame) if frame is not None else 0
@@ -56,14 +56,16 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Banco inicializado.")
     yield
+    logger.info("Encerrando Engine...")
     await engine.dispose()
 
 app = FastAPI(
     title="Precision Vision Engine",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan
 )
 
+# CORREÇÃO CRÍTICA: Sintaxe do CORS limpa e funcional para permitir conexões locais do React
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -71,6 +73,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Inclusão dos roteadores de aplicação (Exemplo para o consolidador)
+from app.api.consolidation_endpoint import router as consolidation_router
+app.include_router(consolidation_router, prefix="/api/clinical", tags=["Clinical"])
 
 @app.get("/")
 async def root():
