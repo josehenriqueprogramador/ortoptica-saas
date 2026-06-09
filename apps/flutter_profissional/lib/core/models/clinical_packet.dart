@@ -12,8 +12,8 @@ class ClinicalPacket {
 
   factory ClinicalPacket.fromJson(Map<String, dynamic> json) {
     return ClinicalPacket(
-      telemetry: TelemetryResponse.fromJson(json['telemetry'] ?? {}),
-      preExam: json['pre_exam'] != null 
+      telemetry: TelemetryResponse.fromJson(json),
+      preExam: json.containsKey('pre_exam') 
           ? PreExamStatus.fromJson(json['pre_exam']) 
           : null,
     );
