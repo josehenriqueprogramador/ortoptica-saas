@@ -1,55 +1,41 @@
-from typing import Dict, Optional
-from app.session.session_runtime import SessionRuntime
+import json
+from typing import Optional, Dict
+import redis.asyncio as redis
+from app.core.config import settings
 
 class SessionManager:
     """
-    Gerenciador central das sessões clínicas ativas.
-    Estrutura preparada para futura migração para Redis.
+    Gerenciador central de sessões clínicas conectado ao Redis para suportar escalabilidade (Múltiplos workers FastAPI).
     """
-
     def __init__(self):
-        self._sessions: Dict[str, SessionRuntime] = {}
+        self.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        self.prefix = "clinical_session:"
 
-    def create_session(
-        self,
-        session_id: str,
-        patient_id: int,
-        orthoptist_id: int
-    ) -> SessionRuntime:
-
-        runtime = SessionRuntime(
-            session_id=session_id,
-            patient_id=patient_id,
-            orthoptist_id=orthoptist_id
+    async def create_session(self, session_id: str, patient_id: int, orthoptist_id: int) -> Dict:
+        session_data = {
+            "session_id": session_id,
+            "patient_id": patient_id,
+            "orthoptist_id": orthoptist_id,
+            "status": "CREATED"
+        }
+        
+        await self.redis.set(
+            f"{self.prefix}{session_id}",
+            json.dumps(session_data),
+            ex=settings.SESSION_TIMEOUT_SECONDS
         )
+        return session_data
 
-        self._sessions[session_id] = runtime
-        return runtime
+    async def get_session(self, session_id: str) -> Optional[Dict]:
+        data = await self.redis.get(f"{self.prefix}{session_id}")
+        if data:
+            return json.loads(data)
+        return None
 
-    def get_session(
-        self,
-        session_id: str
-    ) -> Optional[SessionRuntime]:
+    async def remove_session(self, session_id: str) -> None:
+        await self.redis.delete(f"{self.prefix}{session_id}")
 
-        return self._sessions.get(session_id)
+    async def exists(self, session_id: str) -> bool:
+        return await self.redis.exists(f"{self.prefix}{session_id}") > 0
 
-    def remove_session(
-        self,
-        session_id: str
-    ):
-
-        if session_id in self._sessions:
-            del self._sessions[session_id]
-
-    def exists(
-        self,
-        session_id: str
-    ) -> bool:
-
-        return session_id in self._sessions
-
-    def active_sessions_count(self) -> int:
-        return len(self._sessions)
-
-# Singleton global do runtime clínico
 session_manager = SessionManager()
